@@ -15,8 +15,8 @@
 <style>
   html,body{margin:0;padding:0;height:100%;background:#20180f;overflow:hidden;
     font-family:Georgia,'Iowan Old Style','Palatino Linotype',serif;}
-  canvas{display:block;width:100vw;height:100vh;cursor:crosshair;}
-  #hint{position:fixed;left:50%;bottom:8px;transform:translateX(-50%);color:#8a7a5e;
+  canvas{display:block;width:100vw;height:100vh;cursor:crosshair;touch-action:none;}
+  #hint{position:fixed;left:50%;bottom:calc(8px + env(safe-area-inset-bottom));transform:translateX(-50%);color:#8a7a5e;
     font-size:11px;letter-spacing:.16em;text-transform:uppercase;pointer-events:none;opacity:.75}
 </style>
 </head>
@@ -793,6 +793,7 @@ const CARDS = [
 
 /* ================================================================== SAVE */
 const SAVE_KEY = 'vellum_save_v1';
+const PREFERS_REDUCED_MOTION=!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 function blankSave(){
   const start = makeItem('implement',0,null,'greatsword');
   return {
@@ -802,7 +803,7 @@ function blankSave(){
     runs:0, wins:0, best:0, townSeen:false, tutorialDone:false,
     seen:{},          // bestiary pages ever inscribed
     seenEnemies:{},
-    settings:{sound:true,shake:true,particles:true,contrast:false,threatCues:true},
+    settings:{sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true},
   };
 }
 function loadSave(){
@@ -817,7 +818,7 @@ function loadSave(){
     if(!s.seen) s.seen = {};
     if(!s.seenEnemies)s.seenEnemies={};
     if(typeof s.tutorialDone!=='boolean') s.tutorialDone=false;
-    s.settings=Object.assign({sound:true,shake:true,particles:true,contrast:false,threatCues:true},s.settings||{});
+    s.settings=Object.assign({sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true},s.settings||{});
     // keep uid counter ahead of anything loaded
     const all = s.stash.concat(SLOTS.map(x=>s.loadout[x]).filter(Boolean));
     for(const it of all){
@@ -2071,7 +2072,7 @@ function draw(){
 }
 
 function drawPageTurn(){
-  if(G.turnT<=0){G.turnSound=false;return;}if(!G.turnSound){G.turnSound=true;sfx('turn');}const k=clamp(G.turnT/.68,0,1),cover=k*k,x=W*(1-cover);
+  if(G.turnT<=0){G.turnSound=false;return;}if(!G.turnSound){G.turnSound=true;sfx('turn');}if(!SV.settings.shake)return;const k=clamp(G.turnT/.68,0,1),cover=k*k,x=W*(1-cover);
   ctx.save();ctx.fillStyle='rgba(28,23,18,'+(.18*cover)+')';ctx.fillRect(Math.max(0,x-18),0,20,H);
   ctx.fillStyle=PARCH4;ctx.fillRect(x,0,W-x,H);ctx.strokeStyle=RUBRIC;ctx.globalAlpha=.32+.45*cover;ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(x+5,0);ctx.quadraticCurveTo(x-8,H*.5,x+5,H);ctx.stroke();
   ctx.strokeStyle='rgba(70,52,30,.10)';ctx.lineWidth=1;for(let y=22;y<H;y+=37){ctx.beginPath();ctx.moveTo(x+12,y);ctx.lineTo(W,y+Math.sin(y)*2);ctx.stroke();}ctx.restore();
@@ -3319,7 +3320,7 @@ function drawSettings(){
   if(uiButton(x+bw-86,y+16,62,26,'RETURN',INK2,true)){G.mode=G.returnMode||'menu';G.turnT=.42;}
   ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 '+(compact?21:28)+'px Georgia,serif';ctx.fillText('READING CONDITIONS',W/2,y+52);
   ctx.fillStyle=INK2;ctx.font='italic 12px Georgia,serif';ctx.fillText('change how the page moves and prints; progress is unaffected',W/2,y+75);
-  const rows=[['sound','SOUND IMPRESSION','paper, timber, weapon, horde, and Warden cues'],['shake','PAGE IMPACT','camera movement when attacks land'],['particles','LOOSE INK','extra combat specks and embers'],['contrast','DARK IMPRESSION','stronger separation between ink and parchment'],['threatCues','THREAT CUES','rings distinguish ranged, support, brood, and guard enemies']];
+  const rows=[['sound','SOUND IMPRESSION','paper, timber, weapon, horde, and Warden cues'],['shake','PAGE MOTION','camera impact and page-turn movement'],['particles','LOOSE INK','extra combat specks and embers'],['contrast','DARK IMPRESSION','stronger separation between ink and parchment'],['threatCues','THREAT CUES','rings distinguish ranged, support, brood, and guard enemies']];
   let ry=y+96;
   for(const [id,name,sub] of rows){ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 '+(compact?11:14)+'px Georgia,serif';ctx.fillText(name,x+(compact?22:42),ry+18);if(!compact){ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(sub,x+42,ry+36);}const on=SV.settings[id];if(uiButton(x+bw-(compact?88:148),ry,compact?66:104,40,on?'ON':'OFF',on?VERD:INK2)){SV.settings[id]=!on;if(id==='sound'&&on&&master)master.gain.value=0;else if(id==='sound'&&master)master.gain.value=.28;applySettings();}ry+=64;}
   const guideLabel=SV.tutorialDone?'REPLAY FIRST-RUN GUIDE':'FIRST-RUN GUIDE IS READY';

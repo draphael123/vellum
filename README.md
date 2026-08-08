@@ -28,7 +28,7 @@ VELLUM is a hand-drawn browser action game set inside a living manuscript. Every
 | Pause / return | `Esc` | Tap the pause or return control |
 | Reading conditions | `O` | Open Options |
 
-The Options page can disable sound, camera impact, loose-ink particles, or role-based threat rings, and can enable a darker high-contrast impression. The first-run guide can be replayed at any time.
+The Options page can disable sound, camera and page-turn motion, loose-ink particles, or role-based threat rings, and can enable a darker high-contrast impression. New saves also respect the device's reduced-motion preference. The first-run guide can be replayed at any time.
 
 ## The build loop
 
