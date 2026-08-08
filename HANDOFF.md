@@ -159,7 +159,8 @@ were structural rather than numerical, and are worth knowing:
 - Fallen timber, exposed roots, and destructible letterpress type replace the
   old geometric wall placeholders. Trail marks lead toward major clearings.
 - The Broken Press is a repeatable combat hazard; the Black Well condenses XP;
-  the Last Desk heals once; the Root Brood and Warden Effigy create field events.
+  the Last Desk heals once; the Root Brood and Warden Effigy create field events;
+  and the Hanging Folio opens a timed direction-and-distance field index.
 - Page selection now resolves with a short transformation stamp showing the
   horde trait and its material colour. Player damage has an edge impression.
 - Newer creature families have baked silhouette additions rather than relying

@@ -860,6 +860,7 @@ const G = {
   skills:{margin:0},
   tutorial:false,
   region:'THE RULED GROVE', regionT:0,
+  folioT:0,
   inscribeFlash:null,
   returnMode:'menu', archivePage:0,
   announced:{},
@@ -872,6 +873,7 @@ const mouse = {x:0, y:0, down:false, clicked:false};
 addEventListener('keydown', e=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   keys[e.key.toLowerCase()] = true;
+  if(G.mode==='menu'&&e.key==='Enter'){G.mode='town';if(!SV.townSeen){SV.townSeen=true;persist();G.townIntro=8;}}
   if(e.key === 'Escape') togglePause();
   if(e.key.toLowerCase()==='o'&&!e.repeat&&['menu','town','paused'].includes(G.mode)){G.returnMode=G.mode;G.mode='settings';}
   if(G.mode==='archive'&&!e.repeat){if(e.key==='ArrowLeft')G.archivePage=(G.archivePage+CARDS.length-1)%CARDS.length;if(e.key==='ArrowRight')G.archivePage=(G.archivePage+1)%CARDS.length;}
@@ -1022,7 +1024,7 @@ function startRun(){
   G.kills=0; G.killsSinceHeal=0; G.corpseCount=0; G.spawnAcc=0; G.wave=0;
   G.skills={}; for(const id of Object.keys(SKILLS)) G.skills[id]=0;
   G.tutorial=!SV.tutorialDone;
-  G.region='THE RULED GROVE';G.regionT=0;
+  G.region='THE RULED GROVE';G.regionT=0;G.folioT=0;
   G.announced={};
   G.player = makePlayer();
   G.cam.x=0; G.cam.y=0; G.shake=0;
@@ -1484,6 +1486,7 @@ function step(dt){
   const nextRegion=regionAt(p.x,p.y);
   if(nextRegion!==G.region){G.region=nextRegion;G.regionT=3.2;say(nextRegion,'a different block was used here');}
   G.regionT=Math.max(0,G.regionT-dt);
+  G.folioT=Math.max(0,G.folioT-dt);
   p.hurtT = Math.max(0,p.hurtT-dt);
   // walk cycle advances only while walking, and settles to a stand when not
   p.walk = isMoving ? (p.walk||0) + dt : 0;
@@ -1844,10 +1847,10 @@ function updatePickups(dt){
     const near=dist2(p.x,p.y,L.x,L.y);
     if(!L.discovered&&near<150*150){L.discovered=true;floater('LANDMARK RECORDED',L.x,L.y-72,BLUEIN);}
     if(L.kind==='camp'&&!L.used&&near<88*88&&p.hp<p.maxhp){L.used=true;p.hp=Math.min(p.maxhp,p.hp+Math.max(24,p.maxhp*.35));say('THE LAST DESK','a sealed ration restores the scribe');fx(L.x,L.y,GOLD2,14);}
-    if(L.kind==='folio'&&!L.read&&near<105*105){L.read=true;say('THE HANGING FOLIO','its torn map names every district');G.regionT=7;}
+    if(L.kind==='folio'&&!L.read&&near<105*105){L.read=true;say('THE HANGING FOLIO','the field index remains open for one minute');G.folioT=60;}
     if(L.kind==='nest'&&!L.opened&&near<150*150){L.opened=true;say('THE ROOT BROOD','something answers beneath the binding');spawnEnemy('broodpod',L.x,L.y);for(let n=0;n<4;n++){const a=n/4*TAU;spawnEnemy(n%2?'rootling':'stumpguard',L.x+Math.cos(a)*72,L.y+Math.sin(a)*72);}}
     if(L.kind==='press'&&near<250*250){L.cd-=dt;if(L.cd<=0){L.cd=6;let hit=0;for(const e of G.enemies){if(dist2(e.x,e.y,L.x,L.y)<230*230){damageEnemy(e,28*implPower(),80);hit++;}}if(hit){burst(L.x,L.y,230,'press');say('THE BROKEN PRESS','its platen falls across the clearing');}}}
-    if(L.kind==='effigy'&&!L.awake&&near<130*130){L.awake=true;p.ward=true;p.wardT=0;const e=spawnEnemy('stumpguard',L.x,L.y+95);if(e){e.elite=true;e.hp*=2;e.maxhp=e.hp;e.xp*=3;}say('THE WARDEN EFFIGY','a ward is granted; its keeper wakes');}
+    if(L.kind==='effigy'&&!L.awake&&near<130*130){L.awake=true;p.ward=true;p.wardT=0;p.hp=Math.min(p.maxhp,p.hp+15);const e=spawnEnemy('stumpguard',L.x,L.y+95);if(e){e.elite=true;e.hp*=2;e.maxhp=e.hp;e.xp*=3;}say('THE WARDEN EFFIGY','a ward is granted; its keeper wakes');}
   }
 }
 
@@ -2511,6 +2514,13 @@ function drawHud(){
     bar(W/2-bw/2, H-52, bw, 14, G.boss.hp/G.boss.maxhp, INK);
     ctx.textAlign='center'; ctx.font='600 12px Georgia, serif'; ctx.fillStyle=INK;
     ctx.fillText('THE ORCHARD-WARDEN', W/2, H-58);
+  }
+
+  if(G.folioT>0){
+    const fh=28+G.landmarks.length*15;ctx.fillStyle='rgba(230,217,184,.84)';ctx.fillRect(20,82,230,fh);ctx.strokeStyle=BLUEIN;ctx.lineWidth=1.3;ctx.strokeRect(20,82,230,fh);
+    ctx.textAlign='left';ctx.fillStyle=BLUEIN;ctx.font='700 10px Georgia,serif';ctx.fillText('THE FOLIO INDEX  ·  '+Math.ceil(G.folioT)+'s',30,100);
+    const dirs=['E','SE','S','SW','W','NW','N','NE'];let fy=119;
+    for(const L of G.landmarks){const a=Math.atan2(L.y-p.y,L.x-p.x),di=(Math.round(a/(Math.PI/4))+8)%8,d=Math.round(Math.hypot(L.x-p.x,L.y-p.y)/10)*10;ctx.fillStyle=L.discovered?INK2:INK;ctx.font=(L.discovered?'500 ':'700 ')+'9px Georgia,serif';ctx.fillText((L.discovered?'✓ ':'◇ ')+L.name+'  ·  '+dirs[di]+' '+d,30,fy);fy+=15;}
   }
 
   // compare card
