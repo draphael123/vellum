@@ -881,7 +881,7 @@ window.G = G;
 /* ================================================================ AUDIO
    A tiny procedural score: dry paper, wooden platen, rubric bell. No samples,
    no download, and nothing starts until the player deliberately interacts. */
-let AC=null, master=null, noiseBuffer=null, lastHitSound=0, ambienceClock=0;
+let AC=null, master=null, noiseBuffer=null, lastHitSound=0, ambienceClock=0,soundGate={};
 function audioReady(){
   if(!SV.settings.sound)return null;
   if(!AC){
@@ -906,12 +906,16 @@ function noise(dur=.06,gain=.08,cut=1300,delay=0){
 }
 function sfx(id,power=1){
   if(!SV.settings.sound)return;
+  const waits={bell:650,quill:160,pod:180},now=performance.now();if(waits[id]&&now-(soundGate[id]||0)<waits[id])return;if(waits[id])soundGate[id]=now;
   if(id==='sweep'){noise(.055,.05*power,900);tone(105,.07,'triangle',.045*power,.62);}
   else if(id==='shot'){noise(.035,.035*power,2600);tone(390,.045,'triangle',.025*power,1.6);}
   else if(id==='lob'){tone(150,.12,'sine',.045*power,.62);noise(.05,.025*power,700,.06);}
   else if(id==='impact'){noise(.13,.11*power,520);tone(58,.16,'triangle',.07*power,.62);}
   else if(id==='hit'){const now=performance.now();if(now-lastHitSound<42)return;lastHitSound=now;noise(.045,.055*power,1100);}
   else if(id==='kill'){tone(92,.07,'square',.025*power,.55);}
+  else if(id==='bell'){tone(196,.18,'triangle',.045,1.25);tone(294,.22,'triangle',.035,.88,.09);}
+  else if(id==='quill'){noise(.13,.05,3200);tone(760,.08,'triangle',.022,.62);}
+  else if(id==='pod'){noise(.18,.09,620);tone(82,.18,'square',.035,.58);}
   else if(id==='hurt'){noise(.12,.12,500);tone(74,.16,'sawtooth',.09,.55);}
   else if(id==='pickup'){tone(520,.07,'sine',.04,1.35);}
   else if(id==='page'){tone(330,.12,'triangle',.06,1.5);tone(495,.16,'triangle',.045,1.25,.08);}
@@ -1152,9 +1156,9 @@ const ENEMY_LORE={
   rootling:['THE ROOTLING','gap runner','Threads through trees and living roots that stop larger creatures.'],
   needlekin:['THE NEEDLEKIN','edge striker','Waits outside the crush, then lunges across the final distance.'],
   bellower:['THE BELLOWER','horde support','Its call hastens nearby enemies. Break the voice before fighting the crowd.'],
-  inkspitter:['THE INKSPITTER','ranged pressure','Draws a red line before firing. Timber and landmarks stop the quill.'],
+  inkspitter:['THE INKSPITTER','ranged pressure','Draws a red line before firing, then sidesteps when timber blocks its quill.'],
   broodpod:['THE BROODPOD','splitting threat','A slow pod that opens into a knot of Rootlings when destroyed.'],
-  stumpguard:['THE STUMPGUARD','armoured anchor','Blunts small hits and gives the horde a durable moving wall.'],
+  stumpguard:['THE STUMPGUARD','armoured anchor','Blunts small hits and shelters nearby bodies. Break the guard before the crowd.'],
   warden:['THE ORCHARD-WARDEN','final authority','Walks after eight minutes, changes pace at half Vellum, and answers with four attack forms.'],
 };
 function spawnRate(){
@@ -1372,6 +1376,7 @@ function killEnemy(e){
     for(const o of G.enemies){ const a=angTo(e.x,e.y,o.x,o.y); if(dist2(e.x,e.y,o.x,o.y)<170*170){o.vx+=Math.cos(a)*320;o.vy+=Math.sin(a)*320;} }
   }
   if(e.kind==='broodpod' && !e.risen){
+    sfx('pod');
     for(let j=0;j<3;j++){
       const a=j/3*TAU+rand(0.3),r=spawnEnemy('rootling',e.x+Math.cos(a)*20,e.y+Math.sin(a)*20);
       if(r) r.risen=true;
@@ -1808,6 +1813,7 @@ function updateEnemies(dt){
       e.special -= dt;
       if(e.special<=0){
         e.special=5.5;
+        sfx('bell');
         G.fx.push({ring:true,x:e.x,y:e.y,r0:10,r1:150,t:0,dur:0.5,col:GOLD});
         for(const o of G.enemies) if(o!==e && dist2(o.x,o.y,e.x,e.y)<150*150) o.haste=1.8;
       }
@@ -1821,7 +1827,7 @@ function updateEnemies(dt){
           const qa=angTo(e.x,e.y,p.x,p.y);
           G.eprojectiles.push({x:e.x,y:e.y,a:qa,spd:245,r:5,dmg:e.dmg,life:0,max:3.2});
         }
-      } else if(e.special<=0&&!e.seekingLine&&dist2(e.x,e.y,p.x,p.y)<410*410){e.special=3.4;e.windup=0.72;}
+      } else if(e.special<=0&&!e.seekingLine&&dist2(e.x,e.y,p.x,p.y)<410*410){e.special=3.4;e.windup=0.72;sfx('quill');}
     }
     if(G.traits.frenzy && e.hp<e.maxhp*0.5) spd*=1.28;
     if(G.traits.seal && !e.sealSpent && e.hp<1){ e.sealSpent=true; e.hp=e.maxhp*0.18; }
@@ -2665,6 +2671,9 @@ function drawHud(){
     bar(W/2-bw/2, H-52, bw, 14, G.boss.hp/G.boss.maxhp, INK);
     ctx.textAlign='center'; ctx.font='600 12px Georgia, serif'; ctx.fillStyle=INK;
     ctx.fillText('THE ORCHARD-WARDEN', W/2, H-58);
+    const form=G.boss.state==='slam'?'PLATEN FALL':G.boss.state==='lash'?'RED MARGIN':G.boss.state==='seed'?'BITTER SEED':'THE WARDEN ADVANCES';
+    ctx.font='italic 500 9px Georgia,serif';ctx.fillStyle=G.boss.state==='chase'?INK2:RUBRIC;
+    ctx.fillText(form+'  ·  '+(G.boss.phase===2?'SECOND IMPRESSION':'FIRST IMPRESSION'),W/2,H-73);
   }
 
   if(G.folioT>0){
@@ -2946,7 +2955,9 @@ function drawPause(){
   ctx.font='500 13px Georgia, serif'; ctx.fillStyle=INK2;
   ctx.fillText(G.region+'  ·  '+G.kills+' felled  ·  '+G.landmarks.filter(L=>L.discovered).length+'/'+G.landmarks.length+' landmarks', W/2, H/2-8);
   ctx.font='500 10px Georgia,serif';ctx.fillText('WASD move  ·  mouse aim  ·  Q active inscription  ·  F equip  ·  Esc continue',W/2,H/2+12);
-  let y = H/2+44;
+  const pausedSkill=SKILLS[activeSkillId()];
+  if(pausedSkill){ctx.fillStyle=pausedSkill.col;ctx.font='700 11px Georgia,serif';ctx.fillText('Q  ·  '+pausedSkill.name.toUpperCase()+'  ·  '+pausedSkill.desc,W/2,H/2+32);}
+  let y = H/2+58;
   for(const id of ['grave','ember','oath']){
     const n=G.doct[id]; const D=DOCTRINES[id];
     ctx.fillStyle = n>=3?D.col:'rgba(60,48,32,0.4)';
