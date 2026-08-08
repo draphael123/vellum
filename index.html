@@ -931,6 +931,7 @@ function audioAmbience(dt){
 /* ================================================================== INPUT */
 const keys = {};
 const mouse = {x:0, y:0, down:false, clicked:false};
+const touch={used:false,moveId:null,aimId:null,sx:0,sy:0,mx:0,my:0};
 const townScale=()=>Math.min(1,(W-30)/840,(H-100)/520);
 addEventListener('keydown', e=>{
   audioReady();
@@ -960,6 +961,25 @@ canvas.addEventListener('mousemove', e=>{
 canvas.addEventListener('mousedown', e=>{ audioReady();mouse.down = true; mouse.clicked = true;if(G.mode==='town'){const s=townScale();G.townTarget={x:(mouse.x-W/2)/s,y:(mouse.y-(H/2+20))/s};} });
 addEventListener('mouseup', ()=>{ mouse.down = false; });
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
+canvas.addEventListener('touchstart',e=>{
+  e.preventDefault();audioReady();touch.used=true;
+  const r=canvas.getBoundingClientRect();
+  for(const q of e.changedTouches){const x=q.clientX-r.left,y=q.clientY-r.top;mouse.x=x;mouse.y=y;
+    if(G.mode==='run'){
+      if(x>W-68&&y<96){togglePause();continue;}
+      if(G.compare&&Math.abs(x-W/2)<92&&y>H-278&&y<H-232){tryEquipCompare();continue;}
+      if(y>H-125&&Math.abs(x-W/2)<85){const id=activeSkillId();if(id)castSkill(id);continue;}
+      if(x<W*.46&&touch.moveId===null){touch.moveId=q.identifier;touch.sx=x;touch.sy=y;touch.mx=0;touch.my=0;}
+      else if(touch.aimId===null){touch.aimId=q.identifier;mouse.down=true;}
+    }else{mouse.down=true;mouse.clicked=true;if(G.mode==='dead'||G.mode==='victory'){endRun();continue;}if(G.mode==='town'){const s=townScale(),wx=(x-W/2)/s,wy=(y-(H/2+20))/s,site=TOWN_SITES.find(v=>dist2(wx,wy,v.x,v.y)<v.r*v.r);if(site&&dist2(G.townPlayer.x,G.townPlayer.y,site.x,site.y)<Math.pow(site.r+35,2)){G.townNear=site;townInteract();}else G.townTarget={x:wx,y:wy};}}
+  }
+},{passive:false});
+canvas.addEventListener('touchmove',e=>{
+  e.preventDefault();const r=canvas.getBoundingClientRect();
+  for(const q of e.changedTouches){const x=q.clientX-r.left,y=q.clientY-r.top;if(q.identifier===touch.moveId){const dx=x-touch.sx,dy=y-touch.sy,d=Math.max(1,Math.hypot(dx,dy)),m=Math.min(1,d/52);touch.mx=dx/d*m;touch.my=dy/d*m;}if(q.identifier===touch.aimId){mouse.x=x;mouse.y=y;}}
+},{passive:false});
+canvas.addEventListener('touchend',e=>{e.preventDefault();for(const q of e.changedTouches){if(q.identifier===touch.moveId){touch.moveId=null;touch.mx=touch.my=0;}if(q.identifier===touch.aimId){touch.aimId=null;}}if(touch.moveId===null&&touch.aimId===null)mouse.down=false;},{passive:false});
+canvas.addEventListener('touchcancel',e=>{touch.moveId=touch.aimId=null;touch.mx=touch.my=0;mouse.down=false;},{passive:false});
 
 function togglePause(){
   if(G.mode === 'run') G.mode = 'paused';
@@ -1575,6 +1595,7 @@ function step(dt){
   if(keys['s']||keys['arrowdown']) my+=1;
   if(keys['a']||keys['arrowleft']) mx-=1;
   if(keys['d']||keys['arrowright'])mx+=1;
+  mx+=touch.mx;my+=touch.my;
   const ml = Math.hypot(mx,my) || 1;
   const isMoving = (mx||my) !== 0;
   p.x += (mx/ml)*p.speed*dt; p.y += (my/ml)*p.speed*dt;
@@ -2607,6 +2628,7 @@ function drawHud(){
     ctx.fillStyle = MATERIALS[k].col;
     ctx.fillText(MATERIALS[k].name + '  ' + v, W-20, my); my += 16;
   }
+  if(touch.used){ctx.fillStyle='rgba(230,217,184,.78)';ctx.fillRect(W-58,62,40,25);ctx.strokeStyle=INK2;ctx.strokeRect(W-58,62,40,25);ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 12px Georgia,serif';ctx.fillText('Ⅱ',W-38,79);}
 
   // Doctrine seals: equipment keywords read as stamped notches at a glance.
   ctx.textAlign='center';let sx=34;
@@ -2630,6 +2652,11 @@ function drawHud(){
     ctx.textAlign='left';ctx.fillStyle=S.col;ctx.font='700 12px Georgia,serif';ctx.fillText(S.key,x+7,y+15);
     ctx.font='600 9px Georgia,serif';ctx.fillStyle=INK;ctx.fillText(S.name.toUpperCase(),x+7,y+30);
     if(cd>0){ctx.textAlign='right';ctx.fillStyle=INK;ctx.font='700 11px Georgia,serif';ctx.fillText(cd.toFixed(1),x+box-6,y+15);}
+  }
+
+  if(touch.used){
+    const jx=touch.moveId===null?74:touch.sx,jy=touch.moveId===null?H-112:touch.sy;ctx.save();ctx.globalAlpha=.48;ctx.strokeStyle=INK2;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(jx,jy,34,0,TAU);ctx.stroke();ctx.fillStyle='rgba(230,217,184,.65)';ctx.beginPath();ctx.arc(jx+touch.mx*24,jy+touch.my*24,13,0,TAU);ctx.fill();ctx.stroke();
+    ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='700 8px Georgia,serif';ctx.fillText('MOVE',jx,jy+49);ctx.beginPath();ctx.arc(W-74,H-112,28,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(W-86,H-112);ctx.lineTo(W-62,H-112);ctx.moveTo(W-74,H-124);ctx.lineTo(W-74,H-100);ctx.stroke();ctx.fillText('DRAG TO AIM',W-74,H-63);ctx.restore();
   }
 
   // boss bar
@@ -2820,6 +2847,7 @@ function drawCompare(){
   ctx.textAlign='center'; ctx.font='600 12px Georgia, serif';
   ctx.fillStyle = better ? VERD : RUBRIC;
   ctx.fillText(better ? '▲ likely an upgrade' : '▼ likely a downgrade', W/2, y-10);
+  if(uiButton(W/2-82,y-46,164,28,'TAKE FOUND ITEM',VERD,true))tryEquipCompare();
   ctx.fillStyle = INK2; ctx.font='500 10px Georgia, serif';
   ctx.fillText('ignoring it shatters it for materials in '+c.t.toFixed(1)+'s', W/2, y+h1+18);
   const before=computeDoctrines(SV.loadout),after=computeDoctrines(Object.assign({},SV.loadout,{[it.slot]:it}));
@@ -2926,7 +2954,8 @@ function drawPause(){
     ctx.fillText(D.name.toUpperCase()+' '+n+(n>=5?'  —  '+D.t5:n>=3?'  —  '+D.t3:'  —  need '+(3-n)+' more'), W/2, y);
     y+=22;
   }
-  if(uiButton(W/2-80,y+12,160,30,'OPTIONS  [O]',INK2,true)){G.returnMode='paused';G.mode='settings';G.turnT=.42;}
+  if(uiButton(W/2-166,y+12,156,30,'CONTINUE',VERD,true))G.mode='run';
+  if(uiButton(W/2+10,y+12,156,30,'OPTIONS  [O]',INK2,true)){G.returnMode='paused';G.mode='settings';G.turnT=.42;}
   ctx.restore();
 }
 function drawEnd(won){
@@ -3261,6 +3290,7 @@ function drawSettings(){
   const bw=Math.min(580,W-40),bh=Math.min(540,H-40),x=(W-bw)/2,y=(H-bh)/2;
   const compact=bw<480;
   ctx.fillStyle=PARCH2;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle=INK;ctx.lineWidth=2.5;ctx.strokeRect(x,y,bw,bh);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1;ctx.strokeRect(x+8,y+8,bw-16,bh-16);
+  if(uiButton(x+bw-86,y+16,62,26,'RETURN',INK2,true)){G.mode=G.returnMode||'menu';G.turnT=.42;}
   ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 '+(compact?21:28)+'px Georgia,serif';ctx.fillText('READING CONDITIONS',W/2,y+52);
   ctx.fillStyle=INK2;ctx.font='italic 12px Georgia,serif';ctx.fillText('change how the page moves and prints; progress is unaffected',W/2,y+75);
   const rows=[['sound','SOUND IMPRESSION','paper, timber, weapon, horde, and Warden cues'],['shake','PAGE IMPACT','camera movement when attacks land'],['particles','LOOSE INK','extra combat specks and embers'],['contrast','DARK IMPRESSION','stronger separation between ink and parchment'],['threatCues','THREAT CUES','rings distinguish ranged, support, brood, and guard enemies']];
@@ -3276,6 +3306,7 @@ function drawArchive(){
   G.archivePage=clamp(G.archivePage,0,list.length-1);
   const i=G.archivePage,bw=Math.min(760,W-50),bh=Math.min(540,H-90),x=(W-bw)/2,y=(H-bh)/2+18;
   ctx.fillStyle=PARCH2;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle=INK;ctx.lineWidth=3;ctx.strokeRect(x,y,bw,bh);ctx.strokeStyle=creatures?VERD:RUBRIC;ctx.lineWidth=1.5;ctx.strokeRect(x+9,y+9,bw-18,bh-18);
+  if(uiButton(x+bw-82,y+18,58,26,'RETURN',INK2,true)){G.mode='town';G.turnT=.46;}
   if(uiButton(W/2-112,y-42,106,30,'PAGES',creatures?INK2:RUBRIC,true)){G.archiveTab='pages';G.archivePage=0;}
   if(uiButton(W/2+6,y-42,106,30,'CREATURES',creatures?VERD:INK2,true)){G.archiveTab='creatures';G.archivePage=0;}
   if(creatures){
@@ -3308,7 +3339,7 @@ function drawForge(){
   ctx.textAlign='left';
   ctx.fillStyle=INK; ctx.font='700 30px Georgia, serif';
   ctx.fillText('THE FORGE', 34, 52);
-  ctx.textAlign='right';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Esc — return to the Scriptorium',W-34,52);ctx.textAlign='left';
+  if(uiButton(W-174,28,140,28,'RETURN TO TOWN',INK2,true)){G.mode='town';G.turnT=.46;}ctx.textAlign='left';
   ctx.fillStyle=RUBRIC; ctx.font='italic 500 13px Georgia, serif';
   ctx.fillText('runs '+SV.runs+'  ·  wardens felled '+SV.wins+'  ·  longest '+fmtTime(SV.best), 34, 74);
   if(G.forgeMsg){ctx.textAlign='right';ctx.fillStyle=VERD;ctx.font='700 12px Georgia,serif';ctx.fillText(G.forgeMsg,W-34,76);ctx.textAlign='left';}
@@ -3482,6 +3513,7 @@ function frame(ts){
   step(dt);
   canvas.style.cursor=G.mode==='run'?'crosshair':G.mode==='town'?'crosshair':'default';
   hint.textContent=({menu:'Enter open · O options',town:'WASD or click move · E enter · O options',forge:'Esc return to town',archive:'← → turn pages · Esc return',settings:'Esc return',run:'WASD move · mouse aim · Q skill · F equip · Esc pause',paused:'Esc continue · O options',levelup:'Click a page · or press 1 2 3',dead:'Space return to town',victory:'Space return to town'})[G.mode]||'';
+  if(touch.used)hint.textContent=({menu:'tap to open',town:'tap to walk · tap a nearby door to enter',forge:'tap controls · tap Return for town',archive:'tap previous or next · tap Return for town',settings:'tap controls · tap Return',run:'left drag move · right drag aim · tap inscription',paused:'tap Continue or Options',levelup:'tap a page',dead:'tap to return',victory:'tap to return'})[G.mode]||hint.textContent;
   draw();
   mouse.clicked = false;
   requestAnimationFrame(frame);
