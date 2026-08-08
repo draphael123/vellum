@@ -795,6 +795,12 @@ const CARDS = [
 /* ================================================================== SAVE */
 const SAVE_KEY = 'vellum_save_v1';
 const PREFERS_REDUCED_MOTION=!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const BINDINGS=[
+  {id:'unbound',name:'THE OPEN FOLIO',mark:'I',col:INK,desc:'The Orchard is read at its intended pressure.',law:'standard formations and rewards',spawn:1,speed:1,reward:1},
+  {id:'thicket',name:'THE CROWDED MARGIN',mark:'II',col:VERD,desc:'Enemy groups arrive more often and closer together.',law:'+22% formation pressure  ·  +35% materials',spawn:1.22,speed:1,reward:1.35},
+  {id:'redhand',name:'THE RED HAND',mark:'III',col:RUBRIC,desc:'Every body keeps a quicker pace; gilded threats are common.',law:'+12% enemy pace  ·  +60% materials',spawn:1.08,speed:1.12,reward:1.6,elite:.055},
+];
+const binding=()=>BINDINGS.find(b=>b.id===G.binding)||BINDINGS[0];
 function blankSave(){
   const start = makeItem('implement',0,null,'greatsword');
   return {
@@ -802,6 +808,7 @@ function blankSave(){
     stash:[],
     loadout:{implement:start, mantle:null, bracers:null, talisman:null},
     runs:0, wins:0, best:0, townSeen:false, tutorialDone:false,
+    mastery:{greatsword:0,longbow:0,censer:0},lastBinding:'unbound',runHistory:[],
     seen:{},          // bestiary pages ever inscribed
     seenEnemies:{},
     settings:{sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true},
@@ -818,6 +825,9 @@ function loadSave(){
     for(const k of MAT_IDS) if(typeof s.mats[k] !== 'number') s.mats[k]=0;
     if(!s.seen) s.seen = {};
     if(!s.seenEnemies)s.seenEnemies={};
+    s.mastery=Object.assign({greatsword:0,longbow:0,censer:0},s.mastery||{});
+    if(!Array.isArray(s.runHistory))s.runHistory=[];
+    if(!BINDINGS.some(b=>b.id===s.lastBinding))s.lastBinding='unbound';
     if(typeof s.tutorialDone!=='boolean') s.tutorialDone=false;
     s.settings=Object.assign({sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true},s.settings||{});
     // keep uid counter ahead of anything loaded
@@ -885,6 +895,7 @@ const G = {
   turnSound:false,
   returnMode:'menu', archivePage:0,archiveTab:'pages',
   abandonConfirm:false,
+  binding:'unbound',outcome:'abandoned',
   announced:{},
 };
 window.G = G;
@@ -893,6 +904,21 @@ window.G = G;
    A tiny procedural score: dry paper, wooden platen, rubric bell. No samples,
    no download, and nothing starts until the player deliberately interacts. */
 let AC=null, master=null, noiseBuffer=null, lastHitSound=0, ambienceClock=0,soundGate={};
+const MUSIC={
+  scriptorium:new Audio('assets/audio/scriptorium.ogg'),
+  orchard:new Audio('assets/audio/orchard.ogg'),
+};
+for(const track of Object.values(MUSIC)){track.loop=true;track.preload='auto';track.volume=0;}
+let musicUnlocked=false;
+function musicTick(dt){
+  const live=musicUnlocked&&SV.settings.sound,target=['run','paused','levelup'].includes(G.mode)?'orchard':'scriptorium';
+  for(const [id,track] of Object.entries(MUSIC)){
+    const wanted=live?(id===target?(id==='orchard'?.13:.16):0):0;
+    track.volume=lerp(track.volume,wanted,Math.min(1,dt*1.5));
+    if(live&&track.paused)track.play().catch(()=>{});
+    if(!live&&track.volume<.002&&!track.paused)track.pause();
+  }
+}
 function audioReady(){
   if(!SV.settings.sound)return null;
   if(!AC){
@@ -902,6 +928,7 @@ function audioReady(){
     const d=noiseBuffer.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);
   }
   if(AC.state==='suspended')AC.resume();
+  if(!musicUnlocked){musicUnlocked=true;for(const track of Object.values(MUSIC))track.play().catch(()=>{});}
   return AC;
 }
 function tone(freq,dur=.08,type='sine',gain=.12,slide=1,delay=0){
@@ -1006,6 +1033,7 @@ function togglePause(){
   if(G.mode === 'run') G.mode = 'paused';
   else if(G.mode === 'paused'){G.abandonConfirm=false;G.mode = 'run';}
   else if(G.mode === 'forge'){G.mode = 'town';G.turnT=.46;}
+  else if(G.mode === 'bindings'){G.mode = 'town';G.turnT=.46;}
   else if(G.mode === 'archive'){G.mode = 'town';G.turnT=.46;}
   else if(G.mode === 'settings'){G.mode = G.returnMode||'menu';G.turnT=.42;}
 }
@@ -1121,6 +1149,7 @@ function activeSkillId(){const id=SV.loadout.implement?.skill||null;return skill
 function startRun(){
   G.mode='run';G.turnT=.68; G.t=0; G.frame=0;
   G.abandonConfirm=false;
+  G.outcome='abandoned';
   G.enemies.length=0; G.projectiles.length=0; G.eprojectiles.length=0;
   G.gems.length=0; G.drops.length=0; G.pools.length=0; G.corpses.length=0;
   G.minions.length=0; G.fx.length=0; G.floaters.length=0; G.swings.length=0;
@@ -1142,9 +1171,14 @@ function startRun(){
 }
 function endRun(){
   // materials and found gear always come home
-  for(const k of MAT_IDS) SV.mats[k] += (G.runMats[k]||0);
+  const reward=binding().reward;
+  for(const k of MAT_IDS) SV.mats[k] += Math.round((G.runMats[k]||0)*reward);
   for(const it of G.runLoot) SV.stash.push(it);
   if(G.t > SV.best) SV.best = G.t;
+  const weapon=SV.loadout.implement?.base||'greatsword',masteryGain=Math.max(1,Math.floor(G.t/150))+(G.outcome==='victory'?2:0);
+  SV.mastery[weapon]=(SV.mastery[weapon]||0)+masteryGain;
+  SV.runHistory.unshift({at:Date.now(),outcome:G.outcome,time:Math.round(G.t),kills:G.kills,level:G.player?.level||1,weapon,binding:G.binding,cards:G.cards.map(c=>c.id),cause:G.deathCause||null});
+  SV.runHistory=SV.runHistory.slice(0,10);
   persist();
   G.mode = 'town';G.turnT=.62;
 }
@@ -1184,7 +1218,7 @@ function spawnRate(){
   if(G.t<2.5)return 0;
   let r = 1.6 + m*1.55 + Math.pow(m,1.7)*0.30;
   if(G.traits.swarm) r *= 1.33;
-  return r;
+  return r*binding().spawn;
 }
 function pickKind(){
   const m = G.t/60;
@@ -1214,13 +1248,13 @@ function spawnEnemy(kind, x, y){
   }
   const e = {
     id:uid(), kind, x, y, vx:0, vy:0, r:K.r,
-    hp:K.hp*hpScale, maxhp:K.hp*hpScale, spd:K.spd*(1+m*0.035)*rand(1.08,0.92),
+    hp:K.hp*hpScale, maxhp:K.hp*hpScale, spd:K.spd*(1+m*0.035)*rand(1.08,0.92)*binding().speed,
     dmg:K.dmg*(1+m*0.14), xp:K.xp,
     hitT:0, burn:0, burnSrc:0, slow:0, haste:0, risen:false,
     wob: rand(TAU), touch:0,
     special:rand(2.5,0.5), lunging:0,
   };
-  if(natural&&m>2.5&&Math.random()<0.028){e.elite=true;e.hp*=2.1;e.maxhp=e.hp;e.r*=1.18;e.dmg*=1.35;e.xp*=3;}
+  if(natural&&m>2.5&&Math.random()<(binding().elite||0.028)){e.elite=true;e.hp*=2.1;e.maxhp=e.hp;e.r*=1.18;e.dmg*=1.35;e.xp*=3;}
   G.enemies.push(e);
   if(!SV.seenEnemies[kind]){SV.seenEnemies[kind]=true;persist();}
   if(natural&&!G.announced[kind]&&kind!=='husk'){
@@ -1311,7 +1345,7 @@ function updateBoss(dt){
     dropGear(b.x, b.y, 3);
     dropGear(b.x+40, b.y+20, 2);
     for(const k of MAT_IDS) G.runMats[k] += 14;
-    G.boss = null; G.mode='victory'; SV.wins++; persist();
+    G.boss = null; G.outcome='victory';G.mode='victory'; SV.wins++; persist();
     sfx('victory');
     G.shake = 20;
   }
@@ -1495,7 +1529,7 @@ function hurtPlayer(n,source){
   if(p.ward){ p.ward=false; p.wardT=0; floater('WARD', p.x, p.y-24, GOLD); G.shake=6; return; }
   p.hp -= n; p.hurtT = 0.42; G.shake = Math.max(G.shake, 5);G.hitStop=Math.max(G.hitStop,.045);sfx('hurt');
   floater('-'+Math.round(n), p.x, p.y-18, RUBRIC);
-  if(p.hp <= 0){ p.hp = 0;G.deathCause=source||'the horde'; G.mode = 'dead';sfx('dead'); }
+  if(p.hp <= 0){ p.hp = 0;G.deathCause=source||'the horde';G.outcome='defeat'; G.mode = 'dead';sfx('dead'); }
 }
 /* Death isn't a puff of dots — the creature un-prints, throwing ink specks
    that stretch along their travel like flicked-off a brush. */
@@ -1601,6 +1635,7 @@ function takeCard(c){
 function step(dt){
   dt = Math.min(dt, 1/25);
   G.dt = dt; G.frame++;
+  musicTick(dt);
   G.turnT=Math.max(0,G.turnT-dt);
   if(G.mode==='run'&&G.hitStop>0){G.hitStop=Math.max(0,G.hitStop-dt);stepFx(dt*.2);return;}
   if(G.mode === 'town'){ updateTown(dt); stepFx(dt); return; }
@@ -2038,6 +2073,7 @@ function draw(){
   if(G.mode === 'menu'){ drawMenu(); ctx.restore(); drawGrain();drawPageTurn(); return; }
   if(G.mode === 'town'){ drawTown(); ctx.restore(); drawGrain();drawPageTurn(); return; }
   if(G.mode === 'forge'){ drawForge(); ctx.restore(); drawGrain();drawPageTurn(); return; }
+  if(G.mode === 'bindings'){ drawBindings(); ctx.restore(); drawGrain();drawPageTurn(); return; }
   if(G.mode === 'archive'){ drawArchive(); ctx.restore(); drawGrain();drawPageTurn(); return; }
   if(G.mode === 'settings'){ drawSettings(); ctx.restore(); drawGrain();drawPageTurn(); return; }
 
@@ -3123,6 +3159,26 @@ function drawMenu(){
 }
 
 /* ================================================================ TOWN */
+function drawBindings(){
+  ctx.save();ctx.fillStyle=PARCH;ctx.fillRect(0,0,W,H);if(PAPER){ctx.fillStyle=PAPER;ctx.fillRect(0,0,W,H);}
+  ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 31px Georgia,serif';ctx.fillText('BIND THE DESCENT',W/2,76);
+  ctx.fillStyle=RUBRIC;ctx.font='italic 13px Georgia,serif';ctx.fillText('choose what pressure the next impression must bear',W/2,101);
+  ctx.strokeStyle=INK2;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(W/2-250,119);ctx.lineTo(W/2+250,119);ctx.stroke();
+  const compact=W<780,cw=compact?Math.min(560,W-36):Math.min(260,(W-90)/3),ch=compact?118:330,gap=compact?12:22;
+  const total=compact?(ch+gap)*BINDINGS.length-gap:(cw+gap)*BINDINGS.length-gap;
+  for(let i=0;i<BINDINGS.length;i++){
+    const B=BINDINGS[i],x=compact?(W-cw)/2:W/2-total/2+i*(cw+gap),y=compact?140+i*(ch+gap):160;
+    const hov=mouse.x>x&&mouse.x<x+cw&&mouse.y>y&&mouse.y<y+ch;if(hov)canvas.style.cursor='pointer';
+    ctx.fillStyle=hov?PARCH4:PARCH2;ctx.fillRect(x,y,cw,ch);ctx.strokeStyle=B.col;ctx.lineWidth=hov?3:1.8;ctx.strokeRect(x,y,cw,ch);ctx.strokeStyle=RUBRIC;ctx.lineWidth=.8;ctx.strokeRect(x+7,y+7,cw-14,ch-14);
+    const cx=x+(compact?56:cw/2),cy=y+(compact?ch/2:64);ctx.save();ctx.translate(cx,cy);ctx.textAlign='center';ctx.strokeStyle=B.col;ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,25,0,TAU);ctx.stroke();ctx.fillStyle=B.col;ctx.font='700 12px Georgia,serif';ctx.fillText(B.mark,0,4);ctx.restore();
+    ctx.textAlign=compact?'left':'center';const tx=compact?x+105:x+cw/2;ctx.fillStyle=INK;ctx.font='700 15px Georgia,serif';ctx.fillText(B.name,tx,y+(compact?34:115));
+    if(compact){ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(B.desc,tx,y+58);ctx.fillStyle=B.col;ctx.font='700 10px Georgia,serif';ctx.fillText(B.law.toUpperCase(),tx,y+83);}
+    else{wrap(B.desc,x+26,y+150,cw-52,18,INK2,'500 13px Georgia,serif');const laws=B.law.split('  ·  ');ctx.fillStyle=B.col;ctx.font='700 9px Georgia,serif';ctx.fillText(laws[0].toUpperCase(),x+cw/2,y+242);if(laws[1])ctx.fillText(laws[1].toUpperCase(),x+cw/2,y+258);ctx.fillStyle=INK2;ctx.font='italic 10px Georgia,serif';ctx.fillText('MATERIAL IMPRESSION  ×'+B.reward.toFixed(2),x+cw/2,y+288);}
+    if(hov&&mouse.clicked){G.binding=B.id;SV.lastBinding=B.id;persist();startRun();}
+  }
+  if(uiButton(W/2-80,H-64,160,32,'RETURN TO TOWN',INK2,true)){G.mode='town';G.turnT=.46;}
+  ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 10px Georgia,serif';ctx.fillText('Esc returns  ·  bindings alter pressure and material yield, never permanent stats',W/2,H-20);ctx.restore();
+}
 const TOWN_SITES = [
   {id:'forge',x:-260,y:8,r:82,name:'THE INK-FORGE',sub:'inscribe, equip, and shatter gear'},
   {id:'archive',x:0,y:-170,r:70,name:'THE BESTIARY',sub:'read the law of the page'},
@@ -3226,7 +3282,7 @@ function townInteract(){
   const s=G.townNear; if(!s)return;
   sfx('ui');
   if(s.id==='forge'){G.forgeMsg=null;G.mode='forge';G.turnT=.5;}
-  if(s.id==='gate') startRun();
+  if(s.id==='gate'){G.binding=SV.lastBinding||'unbound';G.mode='bindings';G.turnT=.5;}
   if(s.id==='archive'){G.archivePage=0;G.archiveTab='pages';G.mode='archive';G.turnT=.5;}
   if(s.id==='seal'){G.townNotice=5;sfx('page');}
 }
@@ -3330,7 +3386,7 @@ function drawSettings(){
   ctx.fillStyle=INK2;ctx.font='italic 12px Georgia,serif';ctx.fillText('change how the page moves and prints; progress is unaffected',W/2,y+75);
   const rows=[['sound','SOUND IMPRESSION','paper, timber, weapon, horde, and Warden cues'],['shake','PAGE MOTION','camera impact and page-turn movement'],['particles','LOOSE INK','extra combat specks and embers'],['contrast','DARK IMPRESSION','stronger separation between ink and parchment'],['threatCues','THREAT CUES','rings distinguish ranged, support, brood, and guard enemies']];
   let ry=y+96;
-  for(const [id,name,sub] of rows){ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 '+(compact?11:14)+'px Georgia,serif';ctx.fillText(name,x+(compact?22:42),ry+18);if(!compact){ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(sub,x+42,ry+36);}const on=SV.settings[id];if(uiButton(x+bw-(compact?88:148),ry,compact?66:104,40,on?'ON':'OFF',on?VERD:INK2)){SV.settings[id]=!on;if(id==='sound'&&on&&master)master.gain.value=0;else if(id==='sound'&&master)master.gain.value=.28;applySettings();}ry+=64;}
+  for(const [id,name,sub] of rows){ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 '+(compact?11:14)+'px Georgia,serif';ctx.fillText(name,x+(compact?22:42),ry+18);if(!compact){ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(sub,x+42,ry+36);}const on=SV.settings[id];if(uiButton(x+bw-(compact?88:148),ry,compact?66:104,40,on?'ON':'OFF',on?VERD:INK2)){SV.settings[id]=!on;if(id==='sound'&&on&&master)master.gain.value=0;else if(id==='sound'){if(master)master.gain.value=.28;audioReady();}applySettings();}ry+=64;}
   const guideLabel=SV.tutorialDone?'REPLAY FIRST-RUN GUIDE':'FIRST-RUN GUIDE IS READY';
   const guideW=Math.min(210,bw-44);if(uiButton(W/2-guideW/2,y+bh-76,guideW,38,guideLabel,RUBRIC,true)){SV.tutorialDone=false;persist();}
   ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Esc returns',W/2,y+bh-22);ctx.restore();
@@ -3547,8 +3603,8 @@ function frame(ts){
   lastFrameAt = now;
   step(dt);
   canvas.style.cursor=G.mode==='run'?'crosshair':G.mode==='town'?'crosshair':'default';
-  hint.textContent=({menu:'Enter open · O options',town:'WASD or click move · E enter · O options',forge:'Esc return to town',archive:'← → turn pages · Esc return',settings:'Esc return',run:'WASD move · mouse aim · Q skill · F equip · Esc pause',paused:'Esc continue · O options',levelup:'Click a page · or press 1 2 3',dead:'Space return to town',victory:'Space return to town'})[G.mode]||'';
-  if(touch.used)hint.textContent=({menu:'tap to open',town:'tap to walk · tap a nearby door to enter',forge:'tap controls · tap Return for town',archive:'tap previous or next · tap Return for town',settings:'tap controls · tap Return',run:'left drag move · right drag aim · tap inscription',paused:'tap Continue or Options',levelup:'tap a page',dead:'tap to return',victory:'tap to return'})[G.mode]||hint.textContent;
+  hint.textContent=({menu:'Enter open · O options',town:'WASD or click move · E enter · O options',bindings:'Choose a binding · Esc return',forge:'Esc return to town',archive:'← → turn pages · Esc return',settings:'Esc return',run:'WASD move · mouse aim · Q skill · F equip · Esc pause',paused:'Esc continue · O options',levelup:'Click a page · or press 1 2 3',dead:'Space return to town',victory:'Space return to town'})[G.mode]||'';
+  if(touch.used)hint.textContent=({menu:'tap to open',town:'tap to walk · tap a nearby door to enter',bindings:'tap a binding · tap Return for town',forge:'tap controls · tap Return for town',archive:'tap previous or next · tap Return for town',settings:'tap controls · tap Return',run:'left drag move · right drag aim · tap inscription',paused:'tap Continue or Options',levelup:'tap a page',dead:'tap to return',victory:'tap to return'})[G.mode]||hint.textContent;
   draw();
   mouse.clicked = false;
   requestAnimationFrame(frame);
