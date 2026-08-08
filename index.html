@@ -873,6 +873,7 @@ window.G = G;
 /* ================================================================== INPUT */
 const keys = {};
 const mouse = {x:0, y:0, down:false, clicked:false};
+const townScale=()=>Math.min(1,(W-30)/840,(H-100)/520);
 addEventListener('keydown', e=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   keys[e.key.toLowerCase()] = true;
@@ -897,7 +898,7 @@ canvas.addEventListener('mousemove', e=>{
   const r = canvas.getBoundingClientRect();
   mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
 });
-canvas.addEventListener('mousedown', e=>{ mouse.down = true; mouse.clicked = true;if(G.mode==='town')G.townTarget={x:mouse.x-W/2,y:mouse.y-(H/2+20)}; });
+canvas.addEventListener('mousedown', e=>{ mouse.down = true; mouse.clicked = true;if(G.mode==='town'){const s=townScale();G.townTarget={x:(mouse.x-W/2)/s,y:(mouse.y-(H/2+20))/s};} });
 addEventListener('mouseup', ()=>{ mouse.down = false; });
 canvas.addEventListener('contextmenu', e=>e.preventDefault());
 
@@ -3030,7 +3031,7 @@ function townBuilding(x,y,w,h,title,mark){
   ctx.restore();
 }
 function drawTown(){
-  ctx.save(); ctx.translate(W/2,H/2+20);
+  ctx.save(); ctx.translate(W/2,H/2+20);ctx.scale(townScale(),townScale());
   // The same ruled page becomes a safe settlement rather than a separate UI skin.
   ctx.strokeStyle='rgba(80,64,40,0.10)';ctx.lineWidth=1;
   for(let y=-260;y<=260;y+=46){ctx.beginPath();ctx.moveTo(-430,y);ctx.lineTo(430,y);ctx.stroke();}
@@ -3098,14 +3099,15 @@ function applySettings(){canvas.style.filter=SV.settings.contrast?'contrast(1.18
 function drawSettings(){
   ctx.save();ctx.fillStyle=PARCH;ctx.fillRect(0,0,W,H);if(PAPER){ctx.fillStyle=PAPER;ctx.fillRect(0,0,W,H);}
   const bw=Math.min(580,W-40),bh=Math.min(470,H-50),x=(W-bw)/2,y=(H-bh)/2;
+  const compact=bw<480;
   ctx.fillStyle=PARCH2;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle=INK;ctx.lineWidth=2.5;ctx.strokeRect(x,y,bw,bh);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1;ctx.strokeRect(x+8,y+8,bw-16,bh-16);
-  ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 28px Georgia,serif';ctx.fillText('READING CONDITIONS',W/2,y+52);
+  ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 '+(compact?21:28)+'px Georgia,serif';ctx.fillText('READING CONDITIONS',W/2,y+52);
   ctx.fillStyle=INK2;ctx.font='italic 12px Georgia,serif';ctx.fillText('change how the page moves and prints; progress is unaffected',W/2,y+75);
   const rows=[['shake','PAGE IMPACT','camera movement when attacks land'],['particles','LOOSE INK','extra combat specks and embers'],['contrast','DARK IMPRESSION','stronger separation between ink and parchment'],['threatCues','THREAT CUES','faint rings distinguish ranged, support, brood, and guard enemies']];
   let ry=y+110;
-  for(const [id,name,sub] of rows){ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 14px Georgia,serif';ctx.fillText(name,x+42,ry+18);ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(sub,x+42,ry+38);const on=SV.settings[id];if(uiButton(x+bw-148,ry,104,42,on?'ON':'OFF',on?VERD:INK2)){SV.settings[id]=!on;applySettings();}ry+=74;}
+  for(const [id,name,sub] of rows){ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 '+(compact?11:14)+'px Georgia,serif';ctx.fillText(name,x+(compact?22:42),ry+18);if(!compact){ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(sub,x+42,ry+38);}const on=SV.settings[id];if(uiButton(x+bw-(compact?88:148),ry,compact?66:104,42,on?'ON':'OFF',on?VERD:INK2)){SV.settings[id]=!on;applySettings();}ry+=74;}
   const guideLabel=SV.tutorialDone?'REPLAY FIRST-RUN GUIDE':'FIRST-RUN GUIDE IS READY';
-  if(uiButton(W/2-105,y+bh-76,210,38,guideLabel,RUBRIC,true)){SV.tutorialDone=false;persist();}
+  const guideW=Math.min(210,bw-44);if(uiButton(W/2-guideW/2,y+bh-76,guideW,38,guideLabel,RUBRIC,true)){SV.tutorialDone=false;persist();}
   ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Esc returns',W/2,y+bh-22);ctx.restore();
 }
 function drawArchive(){
