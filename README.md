@@ -18,6 +18,7 @@ VELLUM is a hand-drawn browser action game set inside a living manuscript. Every
 - A persistent Scriptorium containing the Ink-Forge, Orchard Gate, safe Proofing Yard, unlock monument, page ledger, creature bestiary, and local run ledger.
 - Two CC0 musical loops, a full procedural sound-effect layer, page-turn transitions, hit weight, contextual defeat advice, touch controls, and persistent reading settings.
 - Authored animation and audio beats for inscriptions, elites, low health, forging, the Warden's second impression, and victory.
+- A two-charge Ink-Step with perfect-dodge rewards, enemy break states, rubric executions, crowd collisions, weapon-specific movement, clearer attack tells, Censer reactions, pinned quills, combat composition bonuses, and adaptive musical intensity.
 - Versioned feedback links and an exportable, browser-local playtest report for balance feedback without analytics or accounts.
 
 ## Controls

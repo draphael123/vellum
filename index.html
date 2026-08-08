@@ -49,7 +49,7 @@ const BLUEIN = '#3d4a63';
 const ZONE_TIME   = 480;    // seconds until the Orchard-Warden arrives (v0: 8 min)
 const WORLD       = 2600;   // half-extent of the field
 const MAX_ENEMIES = 420;
-const GAME_VERSION = '0.10.0';
+const GAME_VERSION = '0.11.0';
 
 /* extra tones for the print: ink is never one flat black in a real impression */
 const INK3   = '#2b241b';
@@ -902,6 +902,7 @@ const G = {
   binding:'unbound',outcome:'abandoned',practice:false,
   wanderer:null,wandererSpawned:false,redProcession:false,
   weather:'still',wardenWeaken:null,skillPose:null,eliteIntro:null,ceremony:null,lowPulse:0,
+  combo:{last:null,count:0,t:0},
   announced:{},
 };
 window.G = G;
@@ -919,7 +920,7 @@ let musicUnlocked=false;
 function musicTick(dt){
   const live=musicUnlocked&&SV.settings.sound,target=['run','paused','levelup'].includes(G.mode)?'orchard':'scriptorium';
   for(const [id,track] of Object.entries(MUSIC)){
-    const danger=G.boss&&G.boss.phase===2 ? .035 : 0,duck=(G.ceremony||(G.boss&&G.boss.transition>0)) ? .34 : 1;
+    const danger=(G.boss&&G.boss.phase===2 ? .035 : 0)+Math.min(.025,(G.enemies?.length||0)/5000),duck=(G.ceremony||(G.boss&&G.boss.transition>0)||G.eliteIntro) ? .34 : 1;
     const wanted=live?(id===target?(id==='orchard'?.13+danger:.16)*duck:0):0;
     track.volume=lerp(track.volume,wanted,Math.min(1,dt*1.5));
     if(live&&track.paused)track.play().catch(()=>{});
@@ -983,7 +984,7 @@ function sfx(id,power=1){
 }
 function audioAmbience(dt){
   if(!AC||!SV.settings.sound||G.mode!=='run')return;ambienceClock-=dt;if(ambienceClock>0)return;
-  ambienceClock=G.boss?2.2:rand(6.5,3.5);const cut=G.weather==='rain'?1250:G.weather==='ash'?480:G.region==='THE BROKEN PRESS'?620:850;noise(G.boss?.18:.11,G.boss?.025:.015,cut);if(G.boss)tone(42,.55,'sine',.025,.9);else if(G.region==='THE RED MARGIN'&&Math.random()<.35)tone(185,.32,'triangle',.012,.82);
+  const dense=G.enemies.length>70;ambienceClock=G.boss?2.2:dense?rand(2.8,1.8):rand(6.5,3.5);const cut=G.weather==='rain'?1250:G.weather==='ash'?480:G.region==='THE BROKEN PRESS'?620:850;noise(G.boss?.18:dense?.08:.11,G.boss?.025:dense?.024:.015,cut);if(G.boss)tone(42,.55,'sine',.025,.9);else if(dense){tone(64,.08,'square',.018,.72);tone(92,.06,'triangle',.012,.82,.11);}else if(G.region==='THE RED MARGIN'&&Math.random()<.35)tone(185,.32,'triangle',.012,.82);
 }
 
 /* ================================================================== INPUT */
@@ -1000,10 +1001,11 @@ addEventListener('keydown', e=>{
   if(e.key.toLowerCase()==='o'&&!e.repeat&&['menu','town','paused'].includes(G.mode)){G.returnMode=G.mode;G.mode='settings';G.turnT=.42;}
   if(G.mode==='archive'&&G.archiveTab!=='runs'&&!e.repeat){const n=G.archiveTab==='creatures'?ENEMY_ORDER.length:CARDS.length;if(e.key==='ArrowLeft')G.archivePage=(G.archivePage+n-1)%n;if(e.key==='ArrowRight')G.archivePage=(G.archivePage+1)%n;}
   if(e.key.toLowerCase() === 'e' && G.mode === 'town') townInteract();
-  if(e.key.toLowerCase() === 'e' && G.mode === 'run') interactWanderer();
+  if(e.key.toLowerCase() === 'e' && G.mode === 'run'){interactWanderer();tryExecute();}
   if(G.mode === 'run' && !e.repeat){
     const id=activeSkillId();
     if(id && e.key.toLowerCase()===SKILLS[id].key.toLowerCase()) castSkill(id);
+    if(e.code==='Space')inkStep();
   }
   if(e.key.toLowerCase() === 'f') tryEquipCompare();
   if(G.mode === 'levelup'){
@@ -1025,6 +1027,7 @@ canvas.addEventListener('touchstart',e=>{
   const r=canvas.getBoundingClientRect();
   for(const q of e.changedTouches){const x=q.clientX-r.left,y=q.clientY-r.top;mouse.x=x;mouse.y=y;
     if(G.mode==='run'){
+      if(x>W-78&&y>H-190){inkStep();continue;}
       const wx=x-W/2+G.cam.x,wy=y-H/2+G.cam.y;if(G.wanderer&&dist2(wx,wy,G.wanderer.x,G.wanderer.y)<48*48&&dist2(G.player.x,G.player.y,G.wanderer.x,G.wanderer.y)<78*78){interactWanderer();continue;}
       if(x>W-68&&y<96){togglePause();continue;}
       if(G.compare&&Math.abs(x-W/2)<92&&y>H-278&&y<H-232){tryEquipCompare();continue;}
@@ -1063,9 +1066,12 @@ function makePlayer(){
     face:0, hurtT:0, wardT:0, ward:false,
     hitStreak:0, burnOn:false,
     atkRate:1, pickup:92, xpMul:1,
-    cds:{},
+    cds:{},dashCharges:2,dashRecharge:0,dashT:0,dashA:0,invuln:0,perfect:0,
   };
   return p;
+}
+function inkStep(){
+  const p=G.player;if(!p||G.mode!=='run'||p.dashCharges<=0||p.dashT>0)return;let x=(keys.d?1:0)-(keys.a?1:0)+touch.mx,y=(keys.s?1:0)-(keys.w?1:0)+touch.my;if(!x&&!y){x=Math.cos(p.face);y=Math.sin(p.face);}p.dashA=Math.atan2(y,x);p.dashT=.22;p.invuln=.30;p.dashCharges--;p.dashRecharge=0;G.fx.push({ring:true,x:p.x,y:p.y,r0:4,r1:34,t:0,dur:.24,col:BLUEIN});sfx('turn');
 }
 
 /* Derived stats live in one place so gear/cards/doctrines never fight. */
@@ -1182,6 +1188,7 @@ function startRun(practice=false){
   G.tutorial=!practice&&!SV.tutorialDone;
   G.region='THE RULED GROVE';G.regionT=0;G.folioT=0;
   G.wardenWeaken=null;G.skillPose=null;G.eliteIntro=null;G.ceremony=null;G.lowPulse=0;
+  G.combo={last:null,count:0,t:0};
   G.announced={};
   G.wanderer=null;G.wandererSpawned=false;G.redProcession=false;
   G.player = makePlayer();
@@ -1282,6 +1289,7 @@ function spawnEnemy(kind, x, y){
     special:rand(2.5,0.5), lunging:0,
   };
   if(natural&&m>2.5&&Math.random()<(binding().elite||0.028)){e.elite=true;e.hp*=2.1;e.maxhp=e.hp;e.r*=1.18;e.dmg*=1.35;e.xp*=3;}
+  e.breakMax=e.elite?90:e.kind==='stumpguard'?72:e.kind==='bloat'?48:30;e.break=e.breakMax;e.broken=0;
   G.enemies.push(e);
   if(!SV.seenEnemies[kind]){SV.seenEnemies[kind]=true;persist();}
   if(natural&&!G.announced[kind]&&kind!=='husk'){
@@ -1396,6 +1404,8 @@ function fireWeapons(dt){
   const mw = mouseWorld();
   const a = angTo(p.x,p.y,mw.x,mw.y);
   p.face = a;
+  combatChain('weapon');
+  if(I.kind==='sweep'){p.x+=Math.cos(a)*8;p.y+=Math.sin(a)*8;}else if(I.kind==='shot'){p.x-=Math.cos(a)*4;p.y-=Math.sin(a)*4;}else p.castSlow=.14;
   const dmg = I.dmg * implPower();
   const reach = p.reach;
 
@@ -1422,6 +1432,7 @@ function fireWeapons(dt){
     }
   }
 }
+function combatChain(style){const c=G.combo;if(!c)return;if(c.t>0&&c.last!==style)c.count++;else if(c.last!==style)c.count=1;c.last=style;c.t=3;if(c.count>=3){c.count=0;for(const id of Object.keys(G.skills))G.skills[id]=Math.max(0,G.skills[id]-.8);floater('COMPOSED',G.player.x,G.player.y-42,GOLD);sfx('pickup');}}
 
 function damageEnemy(e, amount, knock, srcA){
   if(e.dead) return;
@@ -1430,8 +1441,9 @@ function damageEnemy(e, amount, knock, srcA){
   if(e.guarded&&e.kind!=='stumpguard')amount*=.76;
   // Ironbark Gloss: bark blunts small cuts far more than big ones
   if(e.bark) amount = amount <= 22 ? amount*0.55 : amount - 10;
-  if(e.kind==='stumpguard') amount = amount<=24 ? amount*0.62 : amount-7;
-  e.hp -= amount; e.hitT = 0.09;if(amount>=30)G.hitStop=Math.max(G.hitStop,.018);
+  if(e.kind==='stumpguard'){if(amount<=24&&Math.random()<.18)floater('BLUNTED',e.x,e.y-e.r-9,INK2);amount = amount<=24 ? amount*0.62 : amount-7;}
+  if(e.broken>0)amount*=1.45;e.break-=Math.max(3,amount*.42+(knock||0)*.035);if(e.break<=0&&e.broken<=0){e.broken=2.2;e.break=e.breakMax;floater('MARGIN BROKEN',e.x,e.y-e.r-18,GOLD);G.hitStop=Math.max(G.hitStop,.055);sfx('platen');}
+  e.hp -= amount; e.hitT = amount>=26 ? .14 : .09;if(amount>=30)G.hitStop=Math.max(G.hitStop,.028);
   sfx('hit',clamp(amount/30,.45,1.25));
   if(G.traits.seal && !e.sealSpent && e.hp <= 0 && Math.random()<0.18){
     e.sealSpent=true; e.hp=e.maxhp*0.18;
@@ -1448,6 +1460,7 @@ function damageEnemy(e, amount, knock, srcA){
 function killEnemy(e){
   if(e.dead) return;
   e.dead = true;
+  if(e.lastEnv){combatChain('environment');G.runMats.heartwood=(G.runMats.heartwood||0)+2;floater(e.lastEnv+' EXECUTION  +2',e.x,e.y-38,GOLD);G.hitStop=Math.max(G.hitStop,.07);sfx('platen',1.2);}
   G.kills++; G.killsSinceHeal++;
   if(e.elite||e.kind==='stumpguard'||G.kills%7===0)sfx('kill',e.elite?1.4:1);
   const p = G.player;
@@ -1568,9 +1581,11 @@ function interactWanderer(){
   heal(18);for(const id of Object.keys(G.skills))G.skills[id]=0;p.ward=true;p.wardT=0;w.traded=true;w.t=4;
   say('A MARGIN MENDED',had?'two materials for a ward and a fresh inscription':'the scribe leaves a kindness in the margin');sfx('page');
 }
+function tryExecute(){const p=G.player,e=G.enemies.find(q=>q.elite&&q.broken>0&&q.hp<q.maxhp*.32&&dist2(p.x,p.y,q.x,q.y)<72*72);if(!e)return;e.lastEnv='RUBRIC FINISH';floater('E  ·  FINAL MARK',e.x,e.y-42,RUBRIC);damageEnemy(e,e.hp+1,220,angTo(p.x,p.y,e.x,e.y));G.shake=12;}
 function hurtPlayer(n,source){
   const p = G.player;
   if(G.practice){floater('NO MARK',p.x,p.y-22,BLUEIN);return;}
+  if(p.invuln>0)return;
   if(p.hurtT > 0) return;
   if(p.ward){ p.ward=false; p.wardT=0; floater('WARD', p.x, p.y-24, GOLD); G.shake=6; return; }
   p.hp -= n; p.hurtT = 0.42; G.shake = Math.max(G.shake, 5);G.hitStop=Math.max(G.hitStop,.045);sfx('hurt');
@@ -1689,6 +1704,7 @@ function step(dt){
   if(G.mode === 'town'){ updateTown(dt); stepFx(dt); return; }
   if(G.mode !== 'run') { stepFx(dt); return; }
   G.t += dt;
+  G.combo.t=Math.max(0,G.combo.t-dt);
   audioAmbience(dt);
   for(let i=G.walls.length-1;i>=0;i--){const w=G.walls[i];if(w.temporary&&(w.life-=dt)<=0){fx(w.x,w.y,INK2,5);G.walls.splice(i,1);}}
   // Do not consume the first-run guide when a new player leaves or falls
@@ -1709,7 +1725,10 @@ function step(dt){
   mx+=touch.mx;my+=touch.my;
   const ml = Math.hypot(mx,my) || 1;
   const isMoving = (mx||my) !== 0;
-  p.x += (mx/ml)*p.speed*dt; p.y += (my/ml)*p.speed*dt;
+  p.invuln=Math.max(0,p.invuln-dt);p.perfect=Math.max(0,p.perfect-dt);
+  if(p.dashCharges<2){p.dashRecharge+=dt;if(p.dashRecharge>=4){p.dashRecharge=0;p.dashCharges++;sfx('pickup');}}
+  if(p.dashT>0){p.dashT-=dt;p.x+=Math.cos(p.dashA)*620*dt;p.y+=Math.sin(p.dashA)*620*dt;fx(p.x,p.y,BLUEIN,2);for(const q of G.eprojectiles)if(dist2(p.x,p.y,q.x,q.y)<52*52&&!q.dodged){q.dodged=true;p.perfect=1.2;for(const id of Object.keys(G.skills))G.skills[id]=Math.max(0,G.skills[id]-2.5);floater('PERFECT MARGIN',p.x,p.y-28,GOLD);sfx('page');}}
+  else{p.castSlow=Math.max(0,(p.castSlow||0)-dt);const pace=p.castSlow>0 ? .62 : 1;p.x += (mx/ml)*p.speed*pace*dt; p.y += (my/ml)*p.speed*pace*dt;}
   resolveWorldCollision(p,p.r);
   p.x = clamp(p.x,-WORLD,WORLD); p.y = clamp(p.y,-WORLD,WORLD);
   const nextRegion=regionAt(p.x,p.y);
@@ -1833,6 +1852,7 @@ function updateProjectiles(dt){
       if(hitE || q.travel >= q.range){
         sfx('impact');
         burst(q.x,q.y,q.blast,'lob');
+        if(hitE&&hitE.burn>0){burst(hitE.x,hitE.y,q.blast*1.25,'slam');for(const o of G.enemies)if(o!==hitE&&dist2(o.x,o.y,hitE.x,hitE.y)<Math.pow(q.blast*1.25,2))damageEnemy(o,q.dmg*.55,120,angTo(hitE.x,hitE.y,o.x,o.y));floater('INKFLASH',hitE.x,hitE.y-34,RUBRIC);}
         for(const e of G.enemies){
           if(dist2(q.x,q.y,e.x,e.y) < q.blast*q.blast) onHit(e, q.dmg, angTo(q.x,q.y,e.x,e.y));
         }
@@ -1851,7 +1871,7 @@ function updateProjectiles(dt){
           if(q.hitset && q.hitset[e.id]) continue;
           (q.hitset = q.hitset||{})[e.id]=1;
           onHit(e, q.dmg, q.a);
-          if(q.pin){e.slow=Math.max(e.slow,3.5);e.vx*=.15;e.vy*=.15;floater('PINNED',e.x,e.y-24,VERD);}
+          if(q.pin){e.slow=Math.max(e.slow,3.5);e.pinned=3.5;e.vx*=.15;e.vy*=.15;floater('PINNED',e.x,e.y-24,VERD);}
           if(hasAffix('forking') && !q.forked){
             q.forked = true;
             for(const off of [-0.45,0.45]){
@@ -1901,7 +1921,7 @@ function updateEnemies(dt){
 
   for(let i=G.enemies.length-1;i>=0;i--){
     const e = G.enemies[i];
-    e.hitT = Math.max(0,e.hitT-dt);
+    e.hitT = Math.max(0,e.hitT-dt);e.broken=Math.max(0,(e.broken||0)-dt);e.pinned=Math.max(0,(e.pinned||0)-dt);
     e.wob += dt*3;
 
     // burn DoT
@@ -1912,13 +1932,15 @@ function updateEnemies(dt){
 
     let spd = e.spd*(G.weather==='rain' ? .94 : G.weather==='harvest' ? 1.06 : 1);
     if(e.slow > 0){ e.slow -= dt; spd *= 0.6; }
+    if(e.broken>0)spd*=.12;
     if(e.haste > 0){ e.haste -= dt; spd *= 1.55; }
 
     // Distinct silhouettes also carry distinct jobs in the crowd.
     if(e.kind==='needlekin'){
       e.special -= dt;
       const d = Math.sqrt(dist2(e.x,e.y,p.x,p.y));
-      if(e.special<=0 && d>95 && d<250){ e.special=3.2; e.lunging=0.42; }
+      if(e.special<=0 && d>95 && d<250){ e.special=3.2; e.lungeTell=.34; }
+      if(e.lungeTell>0){e.lungeTell-=dt;spd*=.18;if(e.lungeTell<=0)e.lunging=.42;}
       if(e.lunging>0){ e.lunging-=dt; spd*=2.65; }
     }
     if(e.kind==='bellower'){
@@ -1954,7 +1976,7 @@ function updateEnemies(dt){
       }
     }
 
-    let a = angTo(e.x,e.y,p.x,p.y),move=1;
+    let a = angTo(e.x,e.y,p.x,p.y),move=1;if(e.burn>0)a+=Math.sin(G.t*8+e.id)*.85;
     if(e.kind==='inkspitter'){
       const d2p=dist2(e.x,e.y,p.x,p.y);
       if(e.seekingLine){a+=(e.id%2?1:-1)*Math.PI*.46;move=1;}
@@ -1967,9 +1989,10 @@ function updateEnemies(dt){
     for(let j=Math.max(0,i-5);j<i;j++){
       const o=G.enemies[j];if(!o||o.dead)continue;
       const dx=e.x-o.x,dy=e.y-o.y,d=Math.hypot(dx,dy),min=(e.r+o.r)*0.72;
-      if(d>0&&d<min){const q=(min-d)*0.5;e.x+=dx/d*q;e.y+=dy/d*q;o.x-=dx/d*q;o.y-=dy/d*q;}
+      if(d>0&&d<min){const force=Math.hypot(e.vx,e.vy);if(force>190&&(e.crashT||0)<=0){damageEnemy(o,Math.min(32,force*.06),95,Math.atan2(dy,dx));o.broken=Math.max(o.broken||0,.25);e.crashT=.22;floater('COLLISION',o.x,o.y-o.r,GOLD);}const q=(min-d)*0.5;e.x+=dx/d*q;e.y+=dy/d*q;o.x-=dx/d*q;o.y-=dy/d*q;}
     }
     e.vx *= Math.pow(0.0009,dt); e.vy *= Math.pow(0.0009,dt);
+    e.crashT=Math.max(0,(e.crashT||0)-dt);
 
 
     // contact damage
@@ -2120,16 +2143,16 @@ function updateEnvironment(dt){
   for(const L of G.landmarks){
     if(L.cd>0)L.cd-=dt;
     if(L.kind==='press'&&L.active){
-      if(L.tell>0){L.tell-=dt;if(L.tell<=0){let hit=0;for(const e of G.enemies)if(Math.abs(e.x-L.x)<105&&Math.abs(e.y-L.y)<72){damageEnemy(e,85,210);hit++;}if(Math.abs(p.x-L.x)<105&&Math.abs(p.y-L.y)<72)hurtPlayer(30,'press');sfx('platen',1.4);burst(L.x,L.y,120,'press');G.shake=15;L.cd=7;L.active=false;}}
+      if(L.tell>0){L.tell-=dt;if(L.tell<=0){let hit=0;for(const e of G.enemies)if(Math.abs(e.x-L.x)<105&&Math.abs(e.y-L.y)<72){e.lastEnv='PRESS';damageEnemy(e,85,210);hit++;}if(Math.abs(p.x-L.x)<105&&Math.abs(p.y-L.y)<72)hurtPlayer(30,'press');sfx('platen',1.4);burst(L.x,L.y,120,'press');G.shake=15;L.cd=7;L.active=false;}}
       else if(L.cd<=0){L.tell=1.15;sfx('marginTell');say('THE PLATEN DESCENDS','lead the horde beneath the red proof');}
     }
   }
   for(const t of G.trees){
-    if(t.fall>0){t.fall-=dt;if(t.fall<=0){const vertical=Math.abs(Math.cos(t.fa))<.7;G.walls.push({x:t.x+Math.cos(t.fa)*60,y:t.y+Math.sin(t.fa)*60,w:vertical?28:160,h:vertical?160:28,kind:'deadfall',hp:999,maxhp:999,temporary:true,life:18,seed:t.v});for(const e of G.enemies)if(dist2(e.x,e.y,t.x,t.y)<170*170)damageEnemy(e,70,260,t.fa);if(dist2(p.x,p.y,t.x,t.y)<125*125)hurtPlayer(18,'deadfall');t.gone=true;burst(t.x,t.y,100,'slam');}}
+    if(t.fall>0){t.fall-=dt;if(t.fall<=0){const vertical=Math.abs(Math.cos(t.fa))<.7;G.walls.push({x:t.x+Math.cos(t.fa)*60,y:t.y+Math.sin(t.fa)*60,w:vertical?28:160,h:vertical?160:28,kind:'deadfall',hp:999,maxhp:999,temporary:true,life:18,seed:t.v});for(const e of G.enemies)if(dist2(e.x,e.y,t.x,t.y)<170*170){e.lastEnv='DEADFALL';damageEnemy(e,70,260,t.fa);}if(dist2(p.x,p.y,t.x,t.y)<125*125)hurtPlayer(18,'deadfall');t.gone=true;burst(t.x,t.y,100,'slam');}}
   }
   G.trees=G.trees.filter(t=>!t.gone);
   for(const h of G.hazards){
-    if(h.kind==='tear'){h.tell=Math.max(0,h.tell-dt);if(h.tell<=0){h.life-=dt;if(Math.abs(p.x-h.x)<h.w/2&&Math.abs(p.y-h.y)<h.h/2)hurtPlayer(5*dt,'torn margin');for(const e of G.enemies)if(Math.abs(e.x-h.x)<h.w/2&&Math.abs(e.y-h.y)<h.h/2)damageEnemy(e,18*dt,0);}continue;}
+    if(h.kind==='tear'){h.tell=Math.max(0,h.tell-dt);if(h.tell<=0){h.life-=dt;if(Math.abs(p.x-h.x)<h.w/2&&Math.abs(p.y-h.y)<h.h/2)hurtPlayer(5*dt,'torn margin');for(const e of G.enemies)if(Math.abs(e.x-h.x)<h.w/2&&Math.abs(e.y-h.y)<h.h/2){e.lastEnv='TORN MARGIN';damageEnemy(e,18*dt,0);}}continue;}
     if(h.kind==='snare'){
       if(h.t>0)h.t-=dt;if(!h.armed&&h.t<=0)h.armed=true;
       if(h.armed){let victim=null;if(dist2(p.x,p.y,h.x,h.y)<h.r*h.r)victim=p;else victim=G.enemies.find(e=>dist2(e.x,e.y,h.x,h.y)<h.r*h.r);if(victim){h.armed=false;h.t=9;victim.slow=Math.max(victim.slow||0,2.4);victim.vx=victim.vy=0;sfx('snare');floater('ROOT-BOUND',victim.x,victim.y-24,VERD);}}
@@ -2137,7 +2160,7 @@ function updateEnvironment(dt){
       h.lit=Math.max(0,h.lit-dt);for(const q of G.pools)if(dist2(q.x,q.y,h.x,h.y)<Math.pow(q.r+h.w*.35,2))h.lit=3;
       const ca=Math.cos(-h.a),sa=Math.sin(-h.a),inside=o=>{const dx=o.x-h.x,dy=o.y-h.y,x=dx*ca-dy*sa,y=dx*sa+dy*ca;return Math.abs(x)<h.w/2&&Math.abs(y)<h.h/2;};
       if(inside(p)){p.x-=Math.cos(p.face)*18*dt;if(h.lit>0)hurtPlayer(2.5*dt,'scorch');}
-      for(const e of G.enemies)if(inside(e)){e.slow=Math.max(e.slow,.12);if(h.lit>0)damageEnemy(e,10*dt,0);}
+      for(const e of G.enemies)if(inside(e)){e.slow=Math.max(e.slow,.12);if(h.lit>0){e.lastEnv='BURNING CHANNEL';damageEnemy(e,10*dt,0);}}
     }
   }
   G.hazards=G.hazards.filter(h=>h.kind!=='tear'||h.life>0);
@@ -2395,6 +2418,10 @@ function drawEnemies(){
       ctx.strokeStyle=INK;ctx.lineWidth=4;ctx.globalAlpha=0.75;
       ctx.beginPath();ctx.moveTo(e.x-e.r-5,e.y-8);ctx.lineTo(e.x-e.r-5,e.y+10);ctx.moveTo(e.x+e.r+5,e.y-8);ctx.lineTo(e.x+e.r+5,e.y+10);ctx.stroke();ctx.globalAlpha=1;
     }
+    if(e.lungeTell>0){ctx.save();ctx.strokeStyle=RUBRIC;ctx.globalAlpha=.75;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(e.x,e.y);const a=angTo(e.x,e.y,G.player.x,G.player.y);ctx.lineTo(e.x+Math.cos(a)*95,e.y+Math.sin(a)*95);ctx.stroke();ctx.beginPath();ctx.arc(e.x,e.y,e.r+7,0,TAU);ctx.stroke();ctx.restore();}
+    if(e.kind==='bellower'&&e.special<.7){ctx.save();ctx.strokeStyle=GOLD;ctx.globalAlpha=.35+.35*(.7-e.special)/.7;ctx.lineWidth=4;ctx.beginPath();ctx.arc(e.x,e.y,e.r+12+(1-e.special/.7)*18,0,TAU);ctx.stroke();ctx.restore();}
+    if((e.elite||heavy)&&e.breakMax){ctx.save();const w=e.elite?44:32,y=e.y-e.r-(e.elite?24:13);ctx.fillStyle='rgba(28,23,18,.22)';ctx.fillRect(e.x-w/2,y,w,3);ctx.fillStyle=e.broken>0?RUBRIC:GOLD;ctx.fillRect(e.x-w/2,y,w*clamp(e.break/e.breakMax,0,1),3);if(e.broken>0){ctx.strokeStyle=RUBRIC;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(e.x-8,e.y-e.r);ctx.lineTo(e.x,e.y-e.r-10);ctx.lineTo(e.x+8,e.y-e.r);ctx.stroke();}ctx.restore();}
+    if(e.pinned>0){ctx.save();ctx.strokeStyle=VERD;ctx.lineWidth=2;for(let i=-1;i<=1;i++){ctx.beginPath();ctx.moveTo(e.x+i*7,e.y-5);ctx.lineTo(e.x+i*11,e.y+e.r+13);ctx.stroke();}ctx.restore();}
     if(e.elite){
       ctx.save();ctx.strokeStyle=GOLD;ctx.lineWidth=2;ctx.globalAlpha=0.7+0.2*Math.sin(G.t*4+e.wob);ctx.setLineDash([5,4]);
       ctx.beginPath();ctx.arc(e.x,e.y,e.r+8,0,TAU);ctx.stroke();ctx.setLineDash([]);
@@ -2780,6 +2807,7 @@ function drawHud(){
   bar(20,42,240,8, p.xp/p.xpNext, INK);
   ctx.textAlign='left'; ctx.fillStyle=INK; ctx.font='600 11px Georgia, serif';
   ctx.fillText('LEVEL '+p.level, 20, 66);
+  ctx.textAlign='left';ctx.fillStyle=BLUEIN;ctx.font='700 9px Georgia,serif';ctx.fillText('INK-STEP  [SPACE]',280,29);for(let i=0;i<2;i++){ctx.save();ctx.translate(291+i*18,44);ctx.rotate(Math.PI/4);ctx.fillStyle=i<p.dashCharges?BLUEIN:'rgba(61,74,99,.18)';ctx.fillRect(-5,-5,10,10);ctx.restore();}if(p.dashCharges<2){ctx.fillStyle=INK2;ctx.font='600 8px Georgia,serif';ctx.fillText((4-p.dashRecharge).toFixed(1),328,47);}
 
   // clock
   ctx.textAlign='center'; ctx.font='600 26px Georgia, serif'; ctx.fillStyle=INK;
@@ -2827,7 +2855,7 @@ function drawHud(){
 
   if(touch.used){
     const jx=touch.moveId===null?74:touch.sx,jy=touch.moveId===null?H-112:touch.sy;ctx.save();ctx.globalAlpha=.48;ctx.strokeStyle=INK2;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(jx,jy,34,0,TAU);ctx.stroke();ctx.fillStyle='rgba(230,217,184,.65)';ctx.beginPath();ctx.arc(jx+touch.mx*24,jy+touch.my*24,13,0,TAU);ctx.fill();ctx.stroke();
-    ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='700 8px Georgia,serif';ctx.fillText('MOVE',jx,jy+49);ctx.beginPath();ctx.arc(W-74,H-112,28,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(W-86,H-112);ctx.lineTo(W-62,H-112);ctx.moveTo(W-74,H-124);ctx.lineTo(W-74,H-100);ctx.stroke();ctx.fillText('DRAG TO AIM',W-74,H-63);ctx.restore();
+    ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='700 8px Georgia,serif';ctx.fillText('MOVE',jx,jy+49);ctx.beginPath();ctx.arc(W-74,H-112,28,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(W-86,H-112);ctx.lineTo(W-62,H-112);ctx.moveTo(W-74,H-124);ctx.lineTo(W-74,H-100);ctx.stroke();ctx.fillText('DRAG TO AIM',W-74,H-63);ctx.beginPath();ctx.arc(W-48,H-160,23,0,TAU);ctx.stroke();ctx.fillText('STEP',W-48,H-157);ctx.restore();
   }
 
   // boss bar
@@ -2881,7 +2909,7 @@ function drawHud(){
     const phase=G.t<8?0:G.t<16?1:G.t<25?2:3;
     const lines=[
       ['MOVE THE SCRIBE','WASD moves. Aim with the mouse; your implement writes by itself.'],
-      ['MAKE SPACE',activeSkillId()?'Press Q for '+SKILLS[activeSkillId()].name+' — '+SKILLS[activeSkillId()].desc+'.':'This implement’s inscription is still sealed. Defeat Wardens to open it.'],
+      ['MAKE SPACE',activeSkillId()?'SPACE ink-steps through danger. Q casts '+SKILLS[activeSkillId()].name+'.':'SPACE ink-steps through danger; the inscription is still sealed.'],
       ['USE THE PAGE','Crack marked trees, bait the red press, and turn pursuers through root snares.'],
       ['WRITE THE HORDE','At level-up, every gift also gives the enemy a trait—and opens its material.'],
     ][phase];
@@ -3353,7 +3381,7 @@ const SKILLS = {
 const SKILL_BY_IMPLEMENT={greatsword:['margin','gutter'],longbow:['redline','pinion'],censer:['bloom','vesper']};
 function castSkill(id){
   const p=G.player,S=SKILLS[id]; if(!p||!S||activeSkillId()!==id||(G.skills[id]||0)>0)return;
-  const mw=mouseWorld(),a=angTo(p.x,p.y,mw.x,mw.y); p.face=a; G.skills[id]=S.cd;G.skillPose={id,t:.55,dur:.55,a};
+  const mw=mouseWorld(),a=angTo(p.x,p.y,mw.x,mw.y); p.face=a; G.skills[id]=S.cd;G.skillPose={id,t:.55,dur:.55,a};combatChain('skill');
   if(id==='margin'){
     const reach=175,arc=2.15;
     G.swings.push({x:p.x,y:p.y,a,arc,reach,t:0,dur:0.32,dmg:18*implPower(),hit:{},skill:true});
@@ -3749,7 +3777,7 @@ function frame(ts){
   lastFrameAt = now;
   step(dt);
   canvas.style.cursor=G.mode==='run'?'crosshair':G.mode==='town'?'crosshair':'default';
-  hint.textContent=({menu:'Enter open · O options',town:'WASD or click move · E enter · O options',bindings:'Choose a binding · Esc return',forge:'Esc return to town',archive:'← → turn pages · Esc return',settings:'Esc return',run:'WASD move · mouse aim · Q skill · F equip · Esc pause',paused:'Esc continue · O options',levelup:'Click a page · or press 1 2 3',dead:'Space return to town',victory:'Space return to town'})[G.mode]||'';
+  hint.textContent=({menu:'Enter open · O options',town:'WASD or click move · E enter · O options',bindings:'Choose a binding · Esc return',forge:'Esc return to town',archive:'← → turn pages · Esc return',settings:'Esc return',run:'WASD move · Space ink-step · Q skill · E finish · F equip · Esc pause',paused:'Esc continue · O options',levelup:'Click a page · or press 1 2 3',dead:'Space return to town',victory:'Space return to town'})[G.mode]||'';
   if(touch.used)hint.textContent=({menu:'tap to open',town:'tap to walk · tap a nearby door to enter',bindings:'tap a binding · tap Return for town',forge:'tap controls · tap Return for town',archive:'tap previous or next · tap Return for town',settings:'tap controls · tap Return',run:'left drag move · right drag aim · tap inscription',paused:'tap Continue or Options',levelup:'tap a page',dead:'tap to return',victory:'tap to return'})[G.mode]||hint.textContent;
   draw();
   mouse.clicked = false;
