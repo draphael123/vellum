@@ -41,6 +41,11 @@ const ZONE_TIME   = 480;    // seconds until the Orchard-Warden arrives (v0: 8 m
 const WORLD       = 2600;   // half-extent of the field
 const MAX_ENEMIES = 420;
 
+/* extra tones for the print: ink is never one flat black in a real impression */
+const INK3   = '#2b241b';
+const INKPALE= 'rgba(28,23,18,0.34)';
+const PARCH4 = '#f2e8cc';
+
 /* ---------------------------------------------------------------- helpers */
 const TAU = Math.PI * 2;
 const clamp = (v,a,b) => v < a ? a : v > b ? b : v;
@@ -52,6 +57,543 @@ const dist2 = (ax,ay,bx,by) => {const dx=ax-bx,dy=ay-by;return dx*dx+dy*dy;};
 const angTo = (ax,ay,bx,by) => Math.atan2(by-ay,bx-ax);
 function angDiff(a,b){let d=(a-b)%TAU; if(d>Math.PI)d-=TAU; if(d<-Math.PI)d+=TAU; return d;}
 let _uid = 1; const uid = () => _uid++;
+
+/* ============================================================ ART ENGINE
+   Everything here runs ONCE at load. Creatures, trees and the paper are baked
+   into offscreen canvases, so the per-frame cost of a 400-strong horde is a
+   drawImage each — which buys us as much carved detail as we care to draw.
+   ==========================================================================*/
+
+/* deterministic noise, so a given creature is carved the same way every load */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+const SS = 2;                       // supersample the bakes so edges stay crisp
+function offscreen(w,h){
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(w*SS); c.height = Math.ceil(h*SS);
+  const x = c.getContext('2d');
+  x.scale(SS,SS);
+  x.lineJoin = 'round'; x.lineCap = 'round';
+  return {c, x, w, h};
+}
+
+/* A closed path whose vertices wander a little and whose segments bow — the
+   difference between a vector ellipse and something cut out of a woodblock. */
+function roughShape(x, pts, jitter, rng){
+  const n = pts.length;
+  const p = pts.map(q => [q[0] + (rng()-0.5)*jitter, q[1] + (rng()-0.5)*jitter]);
+  x.beginPath();
+  x.moveTo(p[0][0], p[0][1]);
+  for(let i=0;i<n;i++){
+    const a = p[i], b = p[(i+1)%n];
+    const mx = (a[0]+b[0])/2 + (rng()-0.5)*jitter*1.6;
+    const my = (a[1]+b[1])/2 + (rng()-0.5)*jitter*1.6;
+    x.quadraticCurveTo(mx, my, b[0], b[1]);
+  }
+  x.closePath();
+}
+function ellipsePts(cx, cy, rx, ry, n, squashTop){
+  const pts = [];
+  for(let i=0;i<n;i++){
+    const a = (i/n)*TAU;
+    let ex = cx + Math.cos(a)*rx, ey = cy + Math.sin(a)*ry;
+    if(squashTop && Math.sin(a) < 0) ey = cy + Math.sin(a)*ry*squashTop;
+    pts.push([ex,ey]);
+  }
+  return pts;
+}
+
+/* Relief printing carves AWAY from black, so shading here is parchment-coloured
+   lines cut into an ink field — not grey paint laid on top. */
+function hatch(x, x0,y0,x1,y1, angle, gap, width, color, alpha, rng, ragged){
+  x.save();
+  x.globalAlpha = alpha;
+  x.strokeStyle = color;
+  x.lineWidth = width;
+  x.lineCap = 'butt';
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  const px = -dy, py = dx;
+  const cx = (x0+x1)/2, cy = (y0+y1)/2;
+  const span = Math.hypot(x1-x0, y1-y0);
+  const n = Math.ceil(span/gap)+2;
+  for(let i=-n;i<=n;i++){
+    const off = i*gap + (rng?(rng()-0.5)*gap*0.25:0);
+    const ax = cx + px*off, ay = cy + py*off;
+    const len = span*0.75 * (ragged&&rng ? (0.55+rng()*0.6) : 1);
+    const slide = ragged&&rng ? (rng()-0.5)*span*0.3 : 0;
+    x.beginPath();
+    x.moveTo(ax - dx*len + dx*slide, ay - dy*len + dy*slide);
+    x.lineTo(ax + dx*len + dx*slide, ay + dy*len + dy*slide);
+    x.stroke();
+  }
+  x.restore();
+}
+
+/* Two slightly-offset strokes read as a real inked impression rather than a
+   clean 1px vector outline. */
+function inkOutline(x, color, w){
+  x.save();
+  x.strokeStyle = color; x.lineWidth = w; x.globalAlpha = 0.95; x.stroke();
+  x.lineWidth = w*0.45; x.globalAlpha = 0.5;
+  x.setLineDash([w*3, w*2.2]); x.stroke(); x.setLineDash([]);
+  x.restore();
+}
+
+/* a gnarled limb: tapers, kinks, and forks into twigs */
+function limb(x, x0,y0, ang, len, w, depth, rng, col){
+  if(depth <= 0 || len < 2) return;
+  const kink = (rng()-0.5)*0.5;
+  const x1 = x0 + Math.cos(ang)*len, y1 = y0 + Math.sin(ang)*len;
+  const mx = x0 + Math.cos(ang+kink)*len*0.5, my = y0 + Math.sin(ang+kink)*len*0.5;
+  x.strokeStyle = col; x.lineWidth = w; x.lineCap='round';
+  x.beginPath(); x.moveTo(x0,y0); x.quadraticCurveTo(mx,my,x1,y1); x.stroke();
+  const forks = depth > 1 ? 2 : (rng()<0.6?2:1);
+  for(let i=0;i<forks;i++){
+    const spread = (i - (forks-1)/2) * (0.55 + rng()*0.5);
+    limb(x, x1,y1, ang+spread+(rng()-0.5)*0.3, len*(0.58+rng()*0.16),
+         Math.max(0.7, w*0.62), depth-1, rng, col);
+  }
+}
+
+/* ---------------------------------------------------------------- paper */
+let PAPER = null, GRAIN = null;
+function bakePaper(){
+  /* A tileable sheet. Deliberately HIGH-FREQUENCY ONLY: the first pass laid
+     broad radial tonal drifts into the tile, and at 256px they read as an
+     obvious repeating quilt the moment the camera moved. Big tonal variation
+     belongs in the per-frame gradients and the world-space foxing blots, which
+     do not tile. */
+  const S = 384;
+  const {c,x} = offscreen(S,S);
+  const rng = mulberry32(0x5EED);
+  x.fillStyle = PARCH; x.fillRect(0,0,S,S);
+  // fibres — short strokes in two directions, wrapped so the tile seams hide
+  // short and faint: longer, darker fibres read as scratches or stray hairs
+  for(let i=0;i<2600;i++){
+    const fx = rng()*S, fy = rng()*S;
+    const a = (rng()<0.5?0:Math.PI/2) + (rng()-0.5)*0.7;
+    const l = 1.5 + rng()*4.5;
+    x.strokeStyle = rng()<0.5 ? 'rgba(150,124,80,0.045)' : 'rgba(252,246,228,0.085)';
+    x.lineWidth = 0.4 + rng()*0.5;
+    for(const [ox,oy] of [[0,0],[S,0],[-S,0],[0,S],[0,-S]]){
+      x.beginPath();
+      x.moveTo(fx+ox, fy+oy);
+      x.lineTo(fx+ox+Math.cos(a)*l, fy+oy+Math.sin(a)*l);
+      x.stroke();
+    }
+  }
+  // flecks of pulp
+  for(let i=0;i<420;i++){
+    x.fillStyle = rng()<0.6 ? 'rgba(120,96,58,0.12)' : 'rgba(70,54,32,0.09)';
+    const r = 0.4+rng()*1.3;
+    x.beginPath(); x.arc(rng()*S, rng()*S, r, 0, TAU); x.fill();
+  }
+  PAPER = ctx.createPattern(c, 'repeat');
+
+  // a separate high-frequency grain laid over the whole screen at the end
+  const {c:c2, x:x2} = offscreen(S,S);
+  const r2 = mulberry32(0xC0FFEE);
+  for(let i=0;i<5200;i++){
+    x2.fillStyle = r2()<0.5 ? 'rgba(60,44,24,0.05)' : 'rgba(255,250,235,0.05)';
+    x2.fillRect(r2()*S, r2()*S, 1, 1);
+  }
+  GRAIN = ctx.createPattern(c2, 'repeat');
+}
+
+/* -------------------------------------------------------------- creatures */
+const SPR = {};
+const FRAMES = 4;
+
+/* NOTE ON SHADING. These read at ~26px tall in a crowd of hundreds, so the
+   silhouette carries everything and interior detail is nearly free to lose.
+   Hatching is deliberately kept to a narrow band on ONE flank at low alpha:
+   the first pass shaded 60% of every body and turned the horde into pale
+   striped mush with no read at all. Ink first, carving second. */
+function bakeHusk(seedBase, tint){
+  // A hunched bark-thing: heavy drooping torso, branch arms, no face.
+  const out = [];
+  for(let f=0; f<FRAMES; f++){
+    const W=46, Hh=56, o = offscreen(W,Hh), x = o.x;
+    const rng = mulberry32(seedBase + f*977);
+    const sway = Math.sin(f/FRAMES*TAU)*2.2;
+    const lift = Math.abs(Math.cos(f/FRAMES*TAU))*1.6;
+    const cx = W/2, cy = Hh*0.58 - lift;
+    const solid = tint || INK;
+
+    // legs first, behind the body
+    x.strokeStyle = solid; x.lineWidth = 3.4; x.lineCap='round';
+    for(const s of [-1,1]){
+      const step = Math.sin(f/FRAMES*TAU + (s>0?0:Math.PI))*3.4;
+      x.beginPath(); x.moveTo(cx+s*3.4, cy+10);
+      x.quadraticCurveTo(cx+s*5.5, cy+16, cx+s*4.6+step, cy+22);
+      x.stroke();
+    }
+    // branch arms — the thing that makes it read as grown, not drawn
+    for(const s of [-1,1]){
+      const swing = Math.sin(f/FRAMES*TAU + (s>0?Math.PI:0))*0.30;
+      limb(x, cx+s*8, cy-4, (s>0? 0.62 : Math.PI-0.62) + swing, 10, 2.9, 2,
+           mulberry32(seedBase+f*13+(s>0?7:19)), solid);
+    }
+    // torso — a leaning teardrop, solid
+    const pts = ellipsePts(cx+sway*0.4, cy, 11.5, 14.5, 13, 0.82)
+      .map(([px,py]) => [px + (py<cy? sway*0.5 : 0), py]);
+    roughShape(x, pts, 1.6, rng);
+    x.fillStyle = solid; x.fill();
+    // A narrow band of carving down the trailing flank ONLY. hatch() strokes
+    // across the whole clip region, so the band has to be clipped by a rect as
+    // well as the body — otherwise the lines wrap the torso and it reads as
+    // bandaging rather than shading.
+    x.save();
+    roughShape(x, pts, 1.6, mulberry32(seedBase+f*977)); x.clip();
+    x.beginPath(); x.rect(cx-13, cy-9, 7.5, 24); x.clip();
+    hatch(x, cx-9, cy+2, cx-6, cy+12, -0.42, 3.6, 1.0, PARCH, 0.30,
+          mulberry32(seedBase+31), true);
+    x.restore();
+    // head: drooping forward, solid — a pale face made them read as skulls
+    const hx = cx + sway*0.8 + 1.6, hy = cy - 15;
+    roughShape(x, ellipsePts(hx, hy, 6.8, 6.0, 10), 1.1, rng);
+    x.fillStyle = solid; x.fill();
+    // one carved notch under the brow: enough to imply a face, not draw one
+    x.strokeStyle = PARCH; x.globalAlpha = 0.42; x.lineWidth = 1.3;
+    x.beginPath(); x.moveTo(hx-3.2, hy+1.2); x.lineTo(hx+2.6, hy+2.0); x.stroke();
+    x.globalAlpha = 1;
+    if(tint){  // revenants get a single wet glint so they pop out of the crowd
+      x.fillStyle = GOLD2;
+      x.beginPath(); x.arc(hx+1.2, hy-0.6, 1.15, 0, TAU); x.fill();
+    }
+    out.push(o.c);
+  }
+  return out;
+}
+
+function bakeCreeper(seedBase){
+  // Low and many-legged. Reads instantly as "faster than the big ones."
+  const out = [];
+  for(let f=0; f<FRAMES; f++){
+    const W=42, Hh=34, o = offscreen(W,Hh), x = o.x;
+    const rng = mulberry32(seedBase + f*613);
+    const cx = W/2, cy = Hh*0.55;
+    x.strokeStyle = INK; x.lineCap='round';
+    for(const s of [-1,1]){
+      for(let i=0;i<3;i++){
+        const ph = f/FRAMES*TAU + i*1.1 + (s>0?0:Math.PI);
+        const kick = Math.sin(ph)*3.6;
+        const ax = cx + s*4 + (i-1)*3.2;
+        x.lineWidth = 1.7;
+        x.beginPath(); x.moveTo(ax, cy+1);
+        x.quadraticCurveTo(ax+s*7, cy+2+kick*0.4, ax+s*9.5, cy+8+kick*0.5);
+        x.stroke();
+      }
+    }
+    // flattened carapace wedge
+    const pts = [[cx,cy-9.5],[cx+11,cy-1],[cx+8.5,cy+5.5],[cx,cy+7.4],[cx-8.5,cy+5.5],[cx-11,cy-1]];
+    roughShape(x, pts, 1.2, rng);
+    x.fillStyle = INK; x.fill();
+    x.save();
+    roughShape(x, pts, 1.2, mulberry32(seedBase+f*613)); x.clip();
+    x.beginPath(); x.rect(cx+2, cy-8, 10, 15); x.clip();
+    hatch(x, cx+5, cy-2, cx+9, cy+4, 0.9, 3.4, 0.95, PARCH, 0.26,
+          mulberry32(seedBase+91), true);
+    x.restore();
+    // one carved chevron so the front end is legible at speed
+    x.strokeStyle = PARCH; x.lineWidth = 1.3; x.globalAlpha=0.5;
+    x.beginPath(); x.moveTo(cx-3.4, cy-3.6); x.lineTo(cx, cy-6.2); x.lineTo(cx+3.4, cy-3.6);
+    x.stroke(); x.globalAlpha=1;
+    out.push(o.c);
+  }
+  return out;
+}
+
+function bakeBloat(seedBase){
+  // A swollen fruit-body, split along a seam. Slow, heavy, worth avoiding.
+  const out = [];
+  for(let f=0; f<FRAMES; f++){
+    const W=62, Hh=62, o = offscreen(W,Hh), x = o.x;
+    const rng = mulberry32(seedBase + f*449);
+    const cx = W/2, cy = Hh*0.55;
+    const pulse = 1 + Math.sin(f/FRAMES*TAU)*0.045;
+    x.strokeStyle = INK; x.lineWidth = 3; x.lineCap='round';
+    for(const s of [-1,1]){
+      x.beginPath(); x.moveTo(cx+s*7, cy+14);
+      x.quadraticCurveTo(cx+s*10, cy+19, cx+s*8, cy+24); x.stroke();
+    }
+    const pts = ellipsePts(cx, cy, 19*pulse, 18*pulse, 15);
+    roughShape(x, pts, 2.0, rng);
+    x.fillStyle = INK; x.fill();
+    x.save(); roughShape(x, pts, 2.0, mulberry32(seedBase+f*449)); x.clip();
+    // two carved rings imply the swell; more than that fills it in
+    x.strokeStyle = PARCH; x.globalAlpha = 0.30;
+    for(let i=1;i<=2;i++){
+      x.lineWidth = 1.4 - i*0.25;
+      x.beginPath(); x.arc(cx-2, cy-1, 6.5*i*pulse, 0.55, 2.45); x.stroke();
+    }
+    x.globalAlpha = 1;
+    x.save();
+    x.beginPath(); x.rect(cx-21, cy+4, 15, 18); x.clip();
+    hatch(x, cx-15, cy+11, cx-9, cy+17, -0.6, 4.0, 1.05, PARCH, 0.24,
+          mulberry32(seedBase+77), true);
+    x.restore();
+    // the seam — the one bright mark, so it reads as split and ripe
+    x.strokeStyle = PARCH; x.lineWidth = 2.0; x.globalAlpha = 0.55;
+    x.beginPath();
+    x.moveTo(cx+1, cy-17*pulse);
+    x.quadraticCurveTo(cx-4, cy, cx+2, cy+16*pulse);
+    x.stroke(); x.globalAlpha = 1;
+    x.restore();
+    out.push(o.c);
+  }
+  return out;
+}
+
+function bakeSkeleton(){
+  const out = [];
+  for(let f=0; f<2; f++){
+    const W=30, Hh=38, o = offscreen(W,Hh), x = o.x;
+    const cx = W/2, cy = Hh*0.55;
+    const sway = f? 1.2 : -1.2;
+    x.strokeStyle = BLUEIN; x.fillStyle = PARCH4;
+    x.lineWidth = 2.0; x.lineCap='round';
+    // legs
+    for(const s of [-1,1]){ x.beginPath(); x.moveTo(cx+s*1.6, cy+6);
+      x.lineTo(cx+s*3.4+(s>0?sway:-sway), cy+13); x.stroke(); }
+    // spine + ribs
+    x.beginPath(); x.moveTo(cx+sway*0.3, cy-4); x.lineTo(cx, cy+6); x.stroke();
+    for(let i=0;i<3;i++){
+      const ry = cy-2+i*3.1, rw = 5.2-i*0.9;
+      x.beginPath(); x.moveTo(cx-rw, ry); x.quadraticCurveTo(cx, ry+1.6, cx+rw, ry); x.stroke();
+    }
+    // arms
+    for(const s of [-1,1]){ x.beginPath(); x.moveTo(cx+s*2, cy-3);
+      x.lineTo(cx+s*7, cy+3-(s>0?sway:0)); x.stroke(); }
+    // skull
+    x.beginPath(); x.arc(cx+sway*0.4, cy-8.5, 4.6, 0, TAU); x.fill(); x.stroke();
+    x.fillStyle = BLUEIN;
+    x.beginPath(); x.arc(cx+sway*0.4-1.7, cy-9, 1.25, 0, TAU); x.fill();
+    x.beginPath(); x.arc(cx+sway*0.4+1.7, cy-9, 1.25, 0, TAU); x.fill();
+    out.push(o.c);
+  }
+  return out;
+}
+
+function bakeTrees(){
+  // Blighted orchard trees: gnarled trunk, forked crown, a few clinging fruits.
+  const out = [];
+  for(let v=0; v<5; v++){
+    const W=120, Hh=140, o = offscreen(W,Hh), x = o.x;
+    const rng = mulberry32(0xA11CE + v*7919);
+    const bx = W/2, by = Hh-14;
+    // trunk: a tapered rough column with a slight lean
+    const lean = (rng()-0.5)*16;
+    const th = 54 + rng()*22;
+    const trunk = [
+      [bx-7, by],[bx-4+lean*0.4, by-th*0.55],[bx-3.4+lean, by-th],
+      [bx+3.4+lean, by-th],[bx+4+lean*0.4, by-th*0.55],[bx+7, by]
+    ];
+    roughShape(x, trunk, 2.0, rng);
+    x.fillStyle = INK; x.fill();
+    // bark carved into the trunk
+    x.save(); roughShape(x, trunk, 2.0, mulberry32(0xA11CE+v*7919)); x.clip();
+    hatch(x, bx-10, by-th, bx+10, by, 1.45, 3.0, 1.1, PARCH, 0.42,
+          mulberry32(v*131+5), true);
+    x.restore();
+    // crown
+    const branches = 3 + (rng()*3|0);
+    for(let i=0;i<branches;i++){
+      const a = -Math.PI/2 + (i-(branches-1)/2)*(0.42+rng()*0.16) + (rng()-0.5)*0.2;
+      limb(x, bx+lean, by-th+2, a, 20+rng()*12, 3.4, 3, mulberry32(v*577+i*89), INK);
+    }
+    // a couple of blighted fruits still hanging
+    const fruits = rng()*3|0;
+    for(let i=0;i<fruits;i++){
+      const fx2 = bx+lean+(rng()-0.5)*44, fy2 = by-th-8-rng()*26;
+      x.fillStyle = RUBRIC; x.globalAlpha = 0.75;
+      x.beginPath(); x.arc(fx2, fy2, 2.4+rng()*1.4, 0, TAU); x.fill();
+      x.globalAlpha = 1;
+    }
+    out.push(o.c);
+  }
+  return out;
+}
+
+function bakeWarden(){
+  // The Orchard-Warden: the orchard itself, stood up and walking.
+  const S = 260, o = offscreen(S,S), x = o.x;
+  const rng = mulberry32(0xBEA57);
+  const cx = S/2, cy = S/2;
+  // root legs
+  for(const s of [-1,1]){
+    limb(x, cx+s*16, cy+34, (s>0?0.75:Math.PI-0.75), 30, 9, 3, mulberry32(0x1001+(s>0?3:9)), INK);
+  }
+  // trunk-body
+  const body = ellipsePts(cx, cy, 50, 58, 17, 0.9);
+  roughShape(x, body, 4.5, rng);
+  x.fillStyle = INK; x.fill();
+  x.save(); roughShape(x, body, 4.5, mulberry32(0xBEA57)); x.clip();
+  // Coarse, uneven bark grain — the earlier fine cross-hatch turned the body
+  // into a flat screen-door mesh. One direction only, heavy and varied.
+  const bg = mulberry32(11);
+  x.strokeStyle = PARCH; x.lineCap = 'round';
+  for(let i=0;i<16;i++){
+    const gx = cx - 46 + i*6.2 + (bg()-0.5)*3;
+    x.globalAlpha = 0.16 + bg()*0.22;
+    x.lineWidth = 1.1 + bg()*2.4;
+    x.beginPath();
+    x.moveTo(gx, cy-60);
+    x.quadraticCurveTo(gx + (bg()-0.5)*13, cy, gx + (bg()-0.5)*9, cy+60);
+    x.stroke();
+  }
+  // a few knots
+  x.globalAlpha = 0.30;
+  for(let i=0;i<4;i++){
+    const kx = cx-34+bg()*66, ky = cy-34+bg()*70;
+    x.lineWidth = 1.4;
+    x.beginPath(); x.ellipse(kx, ky, 3+bg()*4, 1.6+bg()*2, bg()*3, 0, TAU); x.stroke();
+  }
+  x.globalAlpha = 1;
+  x.restore();
+  // the hollow: a carved knot-face, the only bright thing on it
+  x.fillStyle = PARCH;
+  roughShape(x, ellipsePts(cx-2, cy-14, 15, 19, 11), 2.2, mulberry32(77));
+  x.fill();
+  x.fillStyle = INK;
+  roughShape(x, ellipsePts(cx-2, cy-12, 9.5, 13, 10), 1.8, mulberry32(78));
+  x.fill();
+  x.fillStyle = RUBRIC;
+  x.beginPath(); x.arc(cx-6, cy-15, 2.6, 0, TAU); x.fill();
+  x.beginPath(); x.arc(cx+3, cy-14, 2.6, 0, TAU); x.fill();
+  // crown of branches
+  for(let i=0;i<9;i++){
+    const a = -Math.PI/2 + (i-4)*0.36 + (rng()-0.5)*0.12;
+    limb(x, cx+(i-4)*4, cy-52, a, 30+rng()*20, 5.2, 3, mulberry32(0x2002+i*37), INK);
+  }
+  return o.c;
+}
+
+function bakeScribe(){
+  // Hooded scribe, four walk frames, robe hatched like an engraving.
+  const out = [];
+  for(let f=0; f<FRAMES; f++){
+    const W=44, Hh=52, o = offscreen(W,Hh), x = o.x;
+    const rng = mulberry32(0x5C41BE + f*331);
+    const cx = W/2, cy = Hh*0.58;
+    const step = Math.sin(f/FRAMES*TAU);
+    const lift = Math.abs(Math.cos(f/FRAMES*TAU))*1.4;
+    // feet
+    x.strokeStyle = INK; x.lineWidth = 2.6; x.lineCap='round';
+    for(const s of [-1,1]){
+      const k = step*(s>0?1:-1)*2.6;
+      x.beginPath(); x.moveTo(cx+s*2.6, cy+8-lift);
+      x.lineTo(cx+s*3.6+k, cy+14-lift); x.stroke();
+    }
+    // robe — a bell that flares with the stride
+    const robe = [
+      [cx, cy-14-lift],[cx+8.5, cy-4-lift],[cx+10.5+step*1.4, cy+10-lift],
+      [cx, cy+12.5-lift],[cx-10.5+step*1.4, cy+10-lift],[cx-8.5, cy-4-lift]
+    ];
+    roughShape(x, robe, 1.4, rng);
+    x.fillStyle = INK; x.fill();
+    x.save(); roughShape(x, robe, 1.4, mulberry32(0x5C41BE+f*331)); x.clip();
+    // two fold lines only — five turned the robe into a striped ghost
+    x.strokeStyle = PARCH; x.globalAlpha = 0.30; x.lineWidth = 1.1;
+    for(const i of [-1.2, 0.9]){
+      x.beginPath();
+      x.moveTo(cx+i*3.1, cy-9-lift);
+      x.quadraticCurveTo(cx+i*3.8+step*0.8, cy, cx+i*4.6+step*1.4, cy+11-lift);
+      x.stroke();
+    }
+    x.globalAlpha = 1; x.restore();
+    // hood
+    roughShape(x, ellipsePts(cx, cy-16-lift, 7.0, 7.6, 11, 0.85), 1.0, rng);
+    x.fillStyle = INK; x.fill();
+    // one rubric glint under the hood — the scribe's only colour
+    x.fillStyle = RUBRIC;
+    x.beginPath(); x.arc(cx+1.4, cy-15-lift, 1.35, 0, TAU); x.fill();
+    out.push(o.c);
+  }
+  return out;
+}
+
+/* the three implements, drawn as real objects in the scribe's hand */
+function bakeImplements(){
+  const mk = (w,h,fn) => { const o = offscreen(w,h); fn(o.x, w, h); return o.c; };
+  return {
+    greatsword: mk(46,14,(x,w,h)=>{
+      const y=h/2;
+      x.fillStyle=INK;
+      x.beginPath(); x.moveTo(9,y-3.1); x.lineTo(41,y-1.5); x.lineTo(44,y);
+      x.lineTo(41,y+1.5); x.lineTo(9,y+3.1); x.closePath(); x.fill();
+      x.strokeStyle=PARCH; x.globalAlpha=.55; x.lineWidth=.9;
+      x.beginPath(); x.moveTo(11,y); x.lineTo(40,y); x.stroke(); x.globalAlpha=1;
+      x.strokeStyle=INK; x.lineWidth=3.4; x.beginPath(); x.moveTo(8,y-5); x.lineTo(8,y+5); x.stroke();
+      x.lineWidth=2.6; x.beginPath(); x.moveTo(1,y); x.lineTo(8,y); x.stroke();
+    }),
+    censer: mk(34,20,(x,w,h)=>{
+      const y=h/2;
+      x.strokeStyle=INK; x.lineWidth=1.2;
+      x.beginPath(); x.moveTo(2,y-4); x.quadraticCurveTo(14,y-8,24,y-3); x.stroke();
+      x.fillStyle=INK;
+      x.beginPath(); x.moveTo(19,y-3); x.lineTo(30,y-3); x.lineTo(27,y+7); x.lineTo(22,y+7);
+      x.closePath(); x.fill();
+      x.strokeStyle=PARCH; x.globalAlpha=.6; x.lineWidth=1;
+      x.beginPath(); x.moveTo(21,y+1); x.lineTo(28,y+1); x.stroke(); x.globalAlpha=1;
+      x.fillStyle=RUBRIC;
+      x.beginPath(); x.arc(24.5,y+3.5,1.7,0,TAU); x.fill();
+    }),
+    longbow: mk(30,40,(x,w,h)=>{
+      const cx2=w*0.42, cy2=h/2;
+      x.strokeStyle=INK; x.lineWidth=2.6; x.lineCap='round';
+      x.beginPath(); x.arc(cx2-4, cy2, 15, -1.15, 1.15); x.stroke();
+      x.lineWidth=0.9; x.globalAlpha=.85;
+      x.beginPath();
+      x.moveTo(cx2-4+Math.cos(-1.15)*15, cy2+Math.sin(-1.15)*15);
+      x.lineTo(cx2-9, cy2);
+      x.lineTo(cx2-4+Math.cos(1.15)*15, cy2+Math.sin(1.15)*15);
+      x.stroke(); x.globalAlpha=1;
+    }),
+  };
+}
+
+/* Hit flash. Compositing this at draw time with 'source-atop' was a bug: the
+   operation applies to the whole canvas, so filling the sprite's bounding box
+   whitewashed a RECTANGLE of the scene behind it. Baking a parchment-filled
+   silhouette per frame is both correct (the source canvas is transparent
+   outside the shape) and free at runtime. */
+const SPRF = {};
+function flashify(cv){
+  const o = document.createElement('canvas');
+  o.width = cv.width; o.height = cv.height;
+  const x = o.getContext('2d');
+  x.drawImage(cv, 0, 0);
+  x.globalCompositeOperation = 'source-atop';
+  x.fillStyle = PARCH4;
+  x.fillRect(0, 0, o.width, o.height);
+  return o;
+}
+
+let ART_READY = false;
+function bakeArt(){
+  bakePaper();
+  SPR.husk     = bakeHusk(0x1234, null);
+  SPR.revenant = bakeHusk(0x1234, RUBRIC);
+  SPR.creeper  = bakeCreeper(0x5678);
+  SPR.bloat    = bakeBloat(0x9ABC);
+  SPR.skeleton = bakeSkeleton();
+  SPR.trees    = bakeTrees();
+  SPR.warden   = bakeWarden();
+  SPR.scribe   = bakeScribe();
+  SPR.impl     = bakeImplements();
+  for(const k of ['husk','revenant','creeper','bloat','scribe'])
+    SPRF[k] = SPR[k].map(flashify);
+  SPRF.warden = flashify(SPR.warden);
+  ART_READY = true;
+}
 
 /* ============================================================ GEAR SYSTEM */
 
@@ -357,10 +899,12 @@ function implPower(){ const it = SV.loadout.implement; return it ? it.power : 1;
 /* ================================================================== ZONE */
 function buildOrchard(){
   G.trees.length = 0; G.blots.length = 0;
-  for(let i=0;i<190;i++){
+  for(let i=0;i<210;i++){
     const a = rand(TAU), d = 260 + Math.sqrt(Math.random())*(WORLD-320);
-    G.trees.push({ x:Math.cos(a)*d, y:Math.sin(a)*d, s: rand(1.35,0.7), lean: rand(0.5,-0.5), seed: rand(100) });
+    G.trees.push({ x:Math.cos(a)*d, y:Math.sin(a)*d, s: rand(1.15,0.62),
+                   v: randi(5), flip: Math.random()<0.5 });
   }
+  G.trees.sort((a,b)=>a.y-b.y);   // painter's order, fixed once
   for(let i=0;i<60;i++){
     G.blots.push({ x:rand(WORLD*2,-WORLD), y:rand(WORLD*2,-WORLD), r:rand(90,26), a:rand(0.055,0.015) });
   }
@@ -662,10 +1206,13 @@ function hurtPlayer(n){
   floater('-'+Math.round(n), p.x, p.y-18, RUBRIC);
   if(p.hp <= 0){ p.hp = 0; G.mode = 'dead'; }
 }
+/* Death isn't a puff of dots — the creature un-prints, throwing ink specks
+   that stretch along their travel like flicked-off a brush. */
 function fx(x,y,col,n){
   for(let i=0;i<n;i++){
-    const a=rand(TAU), s=rand(150,30);
-    G.fx.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,dur:rand(0.7,0.25),col,r:rand(3,1)});
+    const a=rand(TAU), s=rand(170,35);
+    G.fx.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,dur:rand(0.75,0.25),col,
+               r:rand(3.2,0.9), rot:rand(TAU), spin:rand(6,-6)});
   }
 }
 function burst(x,y,r,kind){
@@ -772,9 +1319,12 @@ function step(dt){
   if(keys['a']||keys['arrowleft']) mx-=1;
   if(keys['d']||keys['arrowright'])mx+=1;
   const ml = Math.hypot(mx,my) || 1;
+  const isMoving = (mx||my) !== 0;
   p.x += (mx/ml)*p.speed*dt; p.y += (my/ml)*p.speed*dt;
   p.x = clamp(p.x,-WORLD,WORLD); p.y = clamp(p.y,-WORLD,WORLD);
   p.hurtT = Math.max(0,p.hurtT-dt);
+  // walk cycle advances only while walking, and settles to a stand when not
+  p.walk = isMoving ? (p.walk||0) + dt : 0;
 
   // ward recharge (Oathmark card / Oath t5)
   const wardMax = G.doct.oath>=5 ? 8 : 12;
@@ -1084,9 +1634,10 @@ function draw(){
   ctx.save();
   // parchment
   ctx.fillStyle = PARCH; ctx.fillRect(0,0,W,H);
+  if(PAPER){ ctx.fillStyle = PAPER; ctx.fillRect(0,0,W,H); }
 
-  if(G.mode === 'menu'){ drawMenu(); ctx.restore(); return; }
-  if(G.mode === 'forge'){ drawForge(); ctx.restore(); return; }
+  if(G.mode === 'menu'){ drawMenu(); ctx.restore(); drawGrain(); return; }
+  if(G.mode === 'forge'){ drawForge(); ctx.restore(); drawGrain(); return; }
 
   const sx = G.shake ? rand(G.shake,-G.shake) : 0;
   const sy = G.shake ? rand(G.shake,-G.shake) : 0;
@@ -1114,21 +1665,36 @@ function draw(){
   if(G.mode === 'paused')  drawPause();
   if(G.mode === 'dead')    drawEnd(false);
   if(G.mode === 'victory') drawEnd(true);
+  drawGrain();
 }
 
 function drawGround(){
   const x0 = G.cam.x - W/2 - 40, y0 = G.cam.y - H/2 - 40;
   const x1 = G.cam.x + W/2 + 40, y1 = G.cam.y + H/2 + 40;
-  // faint ruled hatching, like a page prepared for writing
-  ctx.strokeStyle = 'rgba(80,64,40,0.055)'; ctx.lineWidth = 1;
+  // the sheet itself — fibres and foxing baked into a tiling pattern
+  if(PAPER){
+    ctx.save();
+    ctx.fillStyle = PAPER;
+    ctx.fillRect(x0-40, y0-40, (x1-x0)+80, (y1-y0)+80);
+    ctx.restore();
+  }
+  // ruling: a page prepared for writing, plus a red margin rule
+  ctx.strokeStyle = 'rgba(80,64,40,0.07)'; ctx.lineWidth = 1;
   ctx.beginPath();
   const gap = 46;
   for(let y = Math.floor(y0/gap)*gap; y < y1; y += gap){ ctx.moveTo(x0,y); ctx.lineTo(x1,y); }
   ctx.stroke();
-  // foxing stains
+  ctx.strokeStyle = 'rgba(164,36,59,0.10)'; ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  for(let x = Math.floor(x0/560)*560; x < x1; x += 560){ ctx.moveTo(x,y0); ctx.lineTo(x,y1); }
+  ctx.stroke();
+  // big soft foxing stains over the top
   for(const b of G.blots){
     if(b.x < x0-b.r || b.x > x1+b.r || b.y < y0-b.r || b.y > y1+b.r) continue;
-    ctx.fillStyle = `rgba(120,92,52,${b.a})`;
+    const g = ctx.createRadialGradient(b.x,b.y,b.r*0.15,b.x,b.y,b.r);
+    g.addColorStop(0, `rgba(120,92,52,${b.a*1.5})`);
+    g.addColorStop(1, 'rgba(120,92,52,0)');
+    ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,TAU); ctx.fill();
   }
   // the edge of the page — deliberately drawn as a margin rule, not a stray line
@@ -1147,106 +1713,142 @@ function drawGround(){
   }
 }
 function drawTrees(){
-  const x0=G.cam.x-W/2-90, x1=G.cam.x+W/2+90, y0=G.cam.y-H/2-140, y1=G.cam.y+H/2+90;
+  if(!ART_READY) return;
+  const x0=G.cam.x-W/2-140, x1=G.cam.x+W/2+140, y0=G.cam.y-H/2-200, y1=G.cam.y+H/2+120;
   for(const t of G.trees){
     if(t.x<x0||t.x>x1||t.y<y0||t.y>y1) continue;
-    const s = t.s;
-    ctx.save(); ctx.translate(t.x,t.y); ctx.scale(s,s);
-    // shadow pool
-    ctx.fillStyle='rgba(40,30,18,0.10)';
-    ctx.beginPath(); ctx.ellipse(0,4,20,7,0,0,TAU); ctx.fill();
-    ctx.strokeStyle = INK; ctx.lineCap='round';
-    ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(t.lean*10,-42); ctx.stroke();
-    ctx.lineWidth = 2.6;
-    const br = 5;
-    for(let i=0;i<br;i++){
-      const a = -Math.PI/2 + (i-(br-1)/2)*0.55 + t.lean*0.2;
-      ctx.beginPath(); ctx.moveTo(t.lean*10,-40);
-      const l = 22 + ((t.seed*(i+3))%9);
-      ctx.lineTo(t.lean*10+Math.cos(a)*l, -40+Math.sin(a)*l); ctx.stroke();
-    }
+    const img = SPR.trees[t.v], s = t.s;
+    const w = img.width/SS*s, h = img.height/SS*s;
+    // cast shadow, angled as though the light is high and behind
+    ctx.save();
+    ctx.fillStyle='rgba(48,36,20,0.09)';
+    ctx.beginPath(); ctx.ellipse(t.x+4, t.y+3, 22*s, 7*s, 0, 0, TAU); ctx.fill();
+    ctx.translate(t.x, t.y);
+    if(t.flip) ctx.scale(-1,1);
+    ctx.drawImage(img, -w/2, -h + 14*s, w, h);
     ctx.restore();
   }
 }
 function drawPools(){
+  const t = G.t;
   for(const q of G.pools){
+    if(q.seed === undefined) q.seed = Math.random()*100;
     const k = 1 - q.t/q.dur;
-    const r = q.r*(0.75+0.25*k);
+    const r = q.r*(0.72+0.28*k);
     ctx.save();
-    ctx.globalAlpha = 0.30*k+0.10;
-    ctx.fillStyle = RUBRIC2;
+    /* A scorch MARK, not a puddle. These stack 60-deep at high kill rates, so
+       the fill has to stay near-transparent or the whole page turns pink and
+       the horde stops reading against it. Char first, fire only at the core. */
+    ctx.globalAlpha = 0.10 + 0.10*k;
+    const g = ctx.createRadialGradient(q.x,q.y,r*0.05,q.x,q.y,r);
+    g.addColorStop(0, '#6b2b1c'); g.addColorStop(0.55, 'rgba(107,43,28,0.45)');
+    g.addColorStop(1, 'rgba(70,40,20,0)');
+    ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(q.x,q.y,r,0,TAU); ctx.fill();
-    ctx.globalAlpha = 0.75*k;
-    ctx.strokeStyle = RUBRIC; ctx.lineWidth=2;
-    ctx.beginPath();
-    for(let i=0;i<=14;i++){
-      const a=(i/14)*TAU, rr = r*(0.86+0.14*Math.sin(a*3+q.t*5));
-      i?ctx.lineTo(q.x+Math.cos(a)*rr,q.y+Math.sin(a)*rr):ctx.moveTo(q.x+Math.cos(a)*rr,q.y+Math.sin(a)*rr);
+
+    const edge = (rr0) => {
+      ctx.beginPath();
+      for(let i=0;i<=16;i++){
+        const a=(i/16)*TAU;
+        const rr = rr0*(0.90 + 0.10*Math.sin(a*3.3 + q.seed));
+        i?ctx.lineTo(q.x+Math.cos(a)*rr, q.y+Math.sin(a)*rr)
+         :ctx.moveTo(q.x+Math.cos(a)*rr, q.y+Math.sin(a)*rr);
+      }
+      ctx.closePath();
+    };
+    ctx.globalAlpha = 0.26*k; ctx.strokeStyle = INK3; ctx.lineWidth = 1.6; edge(r); ctx.stroke();
+    // the live fire is a small bright core, and it flickers
+    const core = r*0.34*(0.85+0.15*Math.sin(t*9+q.seed));
+    ctx.globalAlpha = 0.42*k; ctx.fillStyle = RUBRIC2;
+    ctx.beginPath(); ctx.arc(q.x,q.y,core,0,TAU); ctx.fill();
+    // a couple of embers lifting off
+    ctx.globalAlpha = 0.75*k; ctx.fillStyle = GOLD2;
+    for(let i=0;i<2;i++){
+      const a = q.seed + i*2.6 + t*1.4;
+      const rr = r*0.35;
+      ctx.beginPath();
+      ctx.arc(q.x+Math.cos(a)*rr, q.y+Math.sin(a)*rr - (t*9+i*11)%14, 1.15, 0, TAU);
+      ctx.fill();
     }
-    ctx.closePath(); ctx.stroke();
     ctx.restore();
   }
 }
-function inkBody(x,y,r,col,squash,hurt){
-  ctx.fillStyle = hurt ? PARCH : col;
-  ctx.beginPath(); ctx.ellipse(x,y,r,r*(squash||1),0,0,TAU); ctx.fill();
-  if(hurt){ ctx.strokeStyle=col; ctx.lineWidth=2; ctx.stroke(); }
+/* Blit a baked sprite, flipped to face travel, with a white flash on hit.
+   The flash is done by drawing the sprite as a solid parchment silhouette
+   (source-atop over a filled rect) rather than tinting per-pixel. */
+function blit(img, x, y, scale, flip, alpha){
+  const w = img.width/SS*scale, h = img.height/SS*scale;
+  ctx.save();
+  if(alpha !== undefined) ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  if(flip) ctx.scale(-1,1);
+  ctx.drawImage(img, -w/2, -h*0.72, w, h);
+  ctx.restore();
 }
+
 function drawEnemies(){
+  if(!ART_READY) return;
+  const t = G.t;
   for(const e of G.enemies){
-    const K = ENEMY_KINDS[e.kind];
     const hurt = e.hitT > 0;
-    const bob = Math.sin(e.wob)*2;
-    ctx.save();
-    // shadow
-    ctx.fillStyle='rgba(40,30,18,0.13)';
-    ctx.beginPath(); ctx.ellipse(e.x,e.y+e.r*0.8,e.r*0.85,e.r*0.32,0,0,TAU); ctx.fill();
-    const col = e.risen ? RUBRIC : (e.bark ? INK2 : K.col);
-    if(e.kind === 'bloat'){
-      inkBody(e.x, e.y+bob, e.r, col, 1.05, hurt);
-      ctx.strokeStyle = hurt?col:PARCH; ctx.lineWidth=1.6;
-      for(let i=0;i<3;i++){ ctx.beginPath(); ctx.arc(e.x,e.y+bob,e.r*(0.35+i*0.22),0.6,2.2); ctx.stroke(); }
-    } else if(e.kind === 'creeper'){
-      // a low, scuttling wedge
-      ctx.fillStyle = hurt?PARCH:col;
-      ctx.beginPath();
-      ctx.moveTo(e.x, e.y-e.r+bob); ctx.lineTo(e.x+e.r, e.y+e.r*0.7+bob); ctx.lineTo(e.x-e.r, e.y+e.r*0.7+bob);
-      ctx.closePath(); ctx.fill();
-      if(hurt){ctx.strokeStyle=col;ctx.lineWidth=2;ctx.stroke();}
-    } else {
-      inkBody(e.x, e.y+bob, e.r, col, 1.15, hurt);
-      // two arms of hatching, woodcut-style
-      ctx.strokeStyle = hurt?col:PARCH; ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(e.x-e.r*0.55, e.y-e.r*0.2+bob); ctx.lineTo(e.x-e.r*0.95, e.y+e.r*0.5+bob);
-      ctx.moveTo(e.x+e.r*0.55, e.y-e.r*0.2+bob); ctx.lineTo(e.x+e.r*0.95, e.y+e.r*0.5+bob);
-      ctx.stroke();
+    const key = e.risen ? 'revenant' : e.kind;
+    const set = hurt ? SPRF[key] : SPR[key];
+    const f = ((e.wob*1.7)|0) % set.length;
+    const img = set[(f+set.length)%set.length];
+    const sc = e.r/12 * (e.kind==='bloat' ? 0.92 : 1);
+    const flip = G.player.x < e.x;
+    // shadow grounds them; without it the horde floats
+    ctx.fillStyle = 'rgba(48,36,20,0.14)';
+    ctx.beginPath(); ctx.ellipse(e.x, e.y+e.r*0.72, e.r*0.8, e.r*0.28, 0, 0, TAU); ctx.fill();
+    // haste shows as a motion smear behind them
+    if(e.haste > 0){
+      const a = angTo(e.x,e.y,G.player.x,G.player.y);
+      blit(SPR[key][f], e.x-Math.cos(a)*7, e.y-Math.sin(a)*7, sc, flip, 0.22);
+    }
+    blit(img, e.x, e.y, sc, flip);
+    // bark: a second heavier outline, so armoured ones read at a glance
+    if(e.bark){
+      ctx.save(); ctx.globalAlpha = 0.5; ctx.strokeStyle = VERD; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r+2.5, 0, TAU); ctx.stroke(); ctx.restore();
     }
     if(e.burn > 0){
-      ctx.globalAlpha=0.6; ctx.strokeStyle=RUBRIC2; ctx.lineWidth=2;
-      ctx.beginPath(); ctx.arc(e.x,e.y+bob,e.r+3,0,TAU); ctx.stroke(); ctx.globalAlpha=1;
+      ctx.save();
+      ctx.globalAlpha = 0.45 + 0.3*Math.sin(t*14 + e.wob);
+      ctx.strokeStyle = RUBRIC2; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for(let i=0;i<=9;i++){
+        const a=(i/9)*TAU, rr=(e.r+4)*(0.9+0.14*Math.sin(a*3 + t*8));
+        i?ctx.lineTo(e.x+Math.cos(a)*rr, e.y+Math.sin(a)*rr)
+         :ctx.moveTo(e.x+Math.cos(a)*rr, e.y+Math.sin(a)*rr);
+      }
+      ctx.closePath(); ctx.stroke(); ctx.restore();
     }
     if(G.traits.thorns){
-      ctx.strokeStyle = VERD; ctx.lineWidth=1.4; ctx.globalAlpha=0.85;
-      for(let i=0;i<4;i++){ const a=e.wob+i*1.57;
-        ctx.beginPath(); ctx.moveTo(e.x+Math.cos(a)*e.r, e.y+Math.sin(a)*e.r+bob);
-        ctx.lineTo(e.x+Math.cos(a)*(e.r+6), e.y+Math.sin(a)*(e.r+6)+bob); ctx.stroke(); }
-      ctx.globalAlpha=1;
+      ctx.save(); ctx.strokeStyle = VERD; ctx.lineWidth=1.5; ctx.globalAlpha=0.8;
+      ctx.beginPath();
+      for(let i=0;i<5;i++){
+        const a = e.wob*0.5 + i*1.257;
+        ctx.moveTo(e.x+Math.cos(a)*e.r*0.85, e.y+Math.sin(a)*e.r*0.85);
+        ctx.lineTo(e.x+Math.cos(a)*(e.r+6.5), e.y+Math.sin(a)*(e.r+6.5));
+      }
+      ctx.stroke(); ctx.restore();
     }
-    ctx.restore();
   }
 }
+
 function drawMinions(){
+  if(!ART_READY) return;
   for(const m of G.minions){
     const fade = clamp((m.dur-m.life)/2, 0, 1);
-    ctx.save(); ctx.globalAlpha = 0.55+0.45*fade;
-    ctx.fillStyle='rgba(40,30,18,0.12)';
-    ctx.beginPath(); ctx.ellipse(m.x,m.y+9,9,3.4,0,0,TAU); ctx.fill();
-    ctx.fillStyle = PARCH; ctx.strokeStyle = BLUEIN; ctx.lineWidth = 2.4;
-    ctx.beginPath(); ctx.arc(m.x,m.y-4,6.5,0,TAU); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(m.x,m.y+2); ctx.lineTo(m.x,m.y+10); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(m.x-6,m.y+5); ctx.lineTo(m.x+6,m.y+5); ctx.stroke();
+    const f = ((m.life*6)|0) % 2;
+    ctx.fillStyle='rgba(48,36,20,0.11)';
+    ctx.beginPath(); ctx.ellipse(m.x,m.y+8,8,3,0,0,TAU); ctx.fill();
+    // a cold halo marks them as yours
+    ctx.save();
+    ctx.globalAlpha = 0.18*fade; ctx.fillStyle = BLUEIN;
+    ctx.beginPath(); ctx.arc(m.x, m.y-1, 13, 0, TAU); ctx.fill();
     ctx.restore();
+    blit(SPR.skeleton[f], m.x, m.y, 1, Math.cos(m.a) < 0, 0.5+0.5*fade);
   }
 }
 function drawBoss(){
@@ -1270,19 +1872,31 @@ function drawBoss(){
     }
     ctx.globalAlpha=1;
   }
-  ctx.fillStyle='rgba(40,30,18,0.18)';
-  ctx.beginPath(); ctx.ellipse(b.x,b.y+b.r*0.75,b.r*0.9,b.r*0.3,0,0,TAU); ctx.fill();
+  ctx.fillStyle='rgba(48,36,20,0.20)';
+  ctx.beginPath(); ctx.ellipse(b.x,b.y+b.r*0.80,b.r*0.95,b.r*0.30,0,0,TAU); ctx.fill();
   const hurt = b.hitT>0;
-  ctx.fillStyle = hurt ? PARCH : INK;
-  ctx.beginPath(); ctx.ellipse(b.x,b.y,b.r,b.r*1.1,0,0,TAU); ctx.fill();
-  ctx.strokeStyle = hurt?INK:PARCH; ctx.lineWidth=2.4;
-  for(let i=0;i<6;i++){
-    const a = -Math.PI/2 + (i-2.5)*0.42;
-    ctx.beginPath(); ctx.moveTo(b.x+Math.cos(a)*b.r*0.4, b.y+Math.sin(a)*b.r*0.4);
-    ctx.lineTo(b.x+Math.cos(a)*(b.r+26), b.y+Math.sin(a)*(b.r+26)); ctx.stroke();
+  // it lumbers — a slow breathing scale rather than a static blit
+  const breathe = 1 + Math.sin(G.t*(b.phase===2?3.4:2.0))*0.022;
+  const roll = Math.sin(G.t*(b.phase===2?4.2:2.6))*0.028;
+  ctx.save();
+  ctx.translate(b.x, b.y); ctx.rotate(roll); ctx.scale(breathe, breathe);
+  if(G.player.x < b.x) ctx.scale(-1,1);
+  const img = hurt ? SPRF.warden : SPR.warden;
+  const w = img.width/SS*(b.r/56), h = img.height/SS*(b.r/56);
+  ctx.drawImage(img, -w/2, -h*0.56, w, h);
+  ctx.restore();
+  // phase 2: it puts out thorns of its own
+  if(b.phase === 2){
+    ctx.save(); ctx.strokeStyle = RUBRIC; ctx.lineWidth = 2.4; ctx.globalAlpha = 0.75;
+    ctx.beginPath();
+    for(let i=0;i<14;i++){
+      const a = i/14*TAU + G.t*0.35;
+      const r0 = b.r*0.95, r1 = b.r*0.95 + 12 + Math.sin(G.t*5+i)*4;
+      ctx.moveTo(b.x+Math.cos(a)*r0, b.y+Math.sin(a)*r0);
+      ctx.lineTo(b.x+Math.cos(a)*r1, b.y+Math.sin(a)*r1);
+    }
+    ctx.stroke(); ctx.restore();
   }
-  ctx.strokeStyle = b.phase===2?RUBRIC:PARCH; ctx.lineWidth=3;
-  ctx.beginPath(); ctx.arc(b.x,b.y-b.r*0.2,b.r*0.35,0.3,2.84); ctx.stroke();
   ctx.restore();
 }
 function drawPlayer(){
@@ -1297,47 +1911,77 @@ function drawPlayer(){
     ctx.beginPath(); ctx.arc(p.x,p.y,r,0,TAU); ctx.stroke(); ctx.setLineDash([]);
     ctx.globalAlpha=1;
   }
-  ctx.fillStyle='rgba(40,30,18,0.16)';
-  ctx.beginPath(); ctx.ellipse(p.x,p.y+11,11,4,0,0,TAU); ctx.fill();
+  ctx.fillStyle='rgba(48,36,20,0.17)';
+  ctx.beginPath(); ctx.ellipse(p.x,p.y+11,11,3.8,0,0,TAU); ctx.fill();
 
-  const hurt = p.hurtT > 0.24;
-  ctx.fillStyle = hurt ? RUBRIC : INK;
-  // scribe: hooded body + head
-  ctx.beginPath(); ctx.moveTo(p.x, p.y-14);
-  ctx.lineTo(p.x+11, p.y+12); ctx.lineTo(p.x-11, p.y+12); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.arc(p.x, p.y-15, 7, 0, TAU); ctx.fill();
-  // the implement, held toward the cursor
   const a = p.face;
-  ctx.strokeStyle = INK; ctx.lineWidth = 3; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(p.x+Math.cos(a)*6, p.y+Math.sin(a)*6);
-  ctx.lineTo(p.x+Math.cos(a)*20, p.y+Math.sin(a)*20); ctx.stroke();
+  const f = ART_READY ? (((p.walk||0)*7)|0) % FRAMES : 0;
+
+  // implement behind the body when aiming away from the viewer
+  const back = Math.sin(a) < -0.15;
+  if(ART_READY && back) drawImplement(p, a);
+  if(ART_READY) blit((p.hurtT > 0.24 ? SPRF : SPR).scribe[f], p.x, p.y, 1, Math.cos(a) < 0);
+  if(ART_READY && !back) drawImplement(p, a);
+
   if(p.ward){
-    ctx.strokeStyle = GOLD; ctx.lineWidth = 2; ctx.globalAlpha=0.9;
-    ctx.beginPath(); ctx.arc(p.x,p.y-2,20,0,TAU); ctx.stroke(); ctx.globalAlpha=1;
+    ctx.save();
+    ctx.strokeStyle = GOLD; ctx.lineWidth = 2; ctx.globalAlpha=0.55+0.25*Math.sin(G.t*4);
+    ctx.beginPath();
+    for(let i=0;i<=20;i++){
+      const t2=(i/20)*TAU, rr=21*(0.97+0.05*Math.sin(t2*4+G.t*2));
+      i?ctx.lineTo(p.x+Math.cos(t2)*rr,p.y-2+Math.sin(t2)*rr)
+       :ctx.moveTo(p.x+Math.cos(t2)*rr,p.y-2+Math.sin(t2)*rr);
+    }
+    ctx.closePath(); ctx.stroke(); ctx.restore();
   }
+  ctx.restore();
+}
+function drawImplement(p, a){
+  const I = implement();
+  const img = SPR.impl[I.key];
+  if(!img) return;
+  const w = img.width/SS, h = img.height/SS;
+  const flip = Math.cos(a) < 0;
+  // recoil: the implement kicks back right after it fires
+  const cd = I.cd / (p.atkRate||1);
+  const since = clamp(1 - ((p.cds.main||0) / cd), 0, 1);
+  const kick = I.kind==='shot' ? (1-Math.min(since*5,1))*3 : 0;
+  ctx.save();
+  ctx.translate(p.x + Math.cos(a)*(7-kick), p.y + Math.sin(a)*(7-kick) - 2);
+  ctx.rotate(a + (flip ? Math.PI : 0));
+  if(flip) ctx.scale(1,-1);
+  ctx.drawImage(img, -w*0.12, -h/2, w, h);
   ctx.restore();
 }
 function drawSwings(){
   for(const s of G.swings){
     const k = clamp(s.t/s.dur, 0, 1);
     const sweep = s.arc;
-    // leading edge travels the full arc across the swing's life
     const lead = s.a - sweep/2 + sweep*k;
+    const R = s.reach*0.74;
     ctx.save();
-    ctx.lineCap = 'round';
-    // the blade: a heavy wedge trailing the leading edge, anchored on the player
-    ctx.globalAlpha = 0.9*(1-k*0.7);
-    ctx.strokeStyle = INK; ctx.lineWidth = 10;
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.reach*0.72, lead-sweep*0.30, lead); ctx.stroke();
-    // the trail: a thinner, wider ghost of where it has been
-    ctx.globalAlpha = 0.28*(1-k);
-    ctx.lineWidth = 5;
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.reach*0.72, s.a-sweep/2, lead); ctx.stroke();
-    // a short haft joining it back to the hand so it never reads detached
-    ctx.globalAlpha = 0.75*(1-k*0.7); ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.moveTo(s.x, s.y);
-    ctx.lineTo(s.x+Math.cos(lead)*s.reach*0.72, s.y+Math.sin(lead)*s.reach*0.72);
-    ctx.stroke();
+    // A brush stroke, not an arc: the sweep is a filled crescent that tapers to
+    // nothing at the tail, the way a loaded brush lifts off the page.
+    const tail = Math.max(s.a - sweep/2, lead - sweep*0.62);
+    const steps = 12;
+    ctx.beginPath();
+    for(let i=0;i<=steps;i++){
+      const u = i/steps, a = lerp(tail, lead, u);
+      const wdt = 7.5 * Math.pow(u, 0.75);
+      ctx.lineTo(s.x+Math.cos(a)*(R+wdt), s.y+Math.sin(a)*(R+wdt));
+    }
+    for(let i=steps;i>=0;i--){
+      const u = i/steps, a = lerp(tail, lead, u);
+      const wdt = 7.5 * Math.pow(u, 0.75);
+      ctx.lineTo(s.x+Math.cos(a)*(R-wdt), s.y+Math.sin(a)*(R-wdt));
+    }
+    ctx.closePath();
+    ctx.globalAlpha = 0.92*(1-k*0.55);
+    ctx.fillStyle = INK; ctx.fill();
+    // a bright carved highlight riding the leading edge
+    ctx.globalAlpha = 0.5*(1-k);
+    ctx.strokeStyle = PARCH4; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(s.x, s.y, R, lead-sweep*0.16, lead); ctx.stroke();
     ctx.restore();
   }
 }
@@ -1361,10 +2005,22 @@ function drawProjectiles(){
   }
 }
 function drawGems(){
+  // spilled ink, drawn as a teardrop leaning into its own motion
   for(const g of G.gems){
+    const sp = Math.hypot(g.vx,g.vy);
+    ctx.save();
+    ctx.translate(g.x,g.y);
+    ctx.rotate(sp>4 ? Math.atan2(g.vy,g.vx) : Math.sin(g.t*2)*0.3 + Math.PI/2);
     ctx.fillStyle = INK;
     ctx.beginPath();
-    ctx.ellipse(g.x, g.y, 3.2, 4.4, Math.sin(g.t*3)*0.4, 0, TAU); ctx.fill();
+    ctx.moveTo(5.2,0);
+    ctx.quadraticCurveTo(1.2,2.6,-2.6,0.9);
+    ctx.quadraticCurveTo(-4.4,0,-2.6,-0.9);
+    ctx.quadraticCurveTo(1.2,-2.6,5.2,0);
+    ctx.fill();
+    ctx.fillStyle = PARCH4; ctx.globalAlpha = 0.35;
+    ctx.beginPath(); ctx.ellipse(1.6,-0.5,1.1,0.55,0,0,TAU); ctx.fill();
+    ctx.restore();
   }
 }
 function drawDrops(){
@@ -1372,30 +2028,75 @@ function drawDrops(){
     const R = RARITY[d.item.rarity];
     const y = d.y + Math.sin(d.bob)*3;
     ctx.save();
-    ctx.globalAlpha=0.5; ctx.strokeStyle = R.col; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.arc(d.x,y,15+Math.sin(d.bob*1.4)*2,0,TAU); ctx.stroke();
-    ctx.globalAlpha=1;
-    ctx.fillStyle = R.col;
-    // a little folded-page glyph
+    // shadow so it sits on the page
+    ctx.fillStyle='rgba(48,36,20,0.13)';
+    ctx.beginPath(); ctx.ellipse(d.x, d.y+11, 9, 3, 0, 0, TAU); ctx.fill();
+    // rarity halo, brighter and busier the better the roll
+    const n = 1 + d.item.rarity;
+    for(let i=0;i<n;i++){
+      ctx.globalAlpha = 0.30 - i*0.06;
+      ctx.strokeStyle = R.col; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(d.x, y, 14+i*4+Math.sin(d.bob*1.4+i)*2, 0, TAU); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // a loose leaf of vellum, curled at one corner
+    ctx.translate(d.x, y);
+    ctx.rotate(Math.sin(d.bob*0.7)*0.10);
+    ctx.fillStyle = PARCH4;
     ctx.beginPath();
-    ctx.moveTo(d.x-6,y-8); ctx.lineTo(d.x+6,y-8); ctx.lineTo(d.x+6,y+8);
-    ctx.lineTo(d.x,y+4); ctx.lineTo(d.x-6,y+8); ctx.closePath(); ctx.fill();
+    ctx.moveTo(-6.5,-9); ctx.lineTo(5,-9); ctx.lineTo(6.5,-6);
+    ctx.lineTo(6.5,9); ctx.lineTo(-6.5,9); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = R.col; ctx.lineWidth = 1.8; ctx.stroke();
+    // the curled corner and a few lines of writing
+    ctx.beginPath(); ctx.moveTo(5,-9); ctx.lineTo(5,-6); ctx.lineTo(6.5,-6); ctx.stroke();
+    ctx.strokeStyle = R.col; ctx.globalAlpha = 0.65; ctx.lineWidth = 1;
+    for(let i=0;i<3;i++){
+      ctx.beginPath(); ctx.moveTo(-3.6, -2.5+i*3.4); ctx.lineTo(3.2, -2.5+i*3.4); ctx.stroke();
+    }
+    // gilded items get a leaf of actual gold
+    if(d.item.rarity === 3){
+      ctx.globalAlpha = 0.9; ctx.fillStyle = GOLD2;
+      ctx.beginPath(); ctx.arc(0,-5.2,1.9,0,TAU); ctx.fill();
+    }
     ctx.restore();
   }
 }
 function drawFx(){
   for(const f of G.fx){
-    const k = 1 - f.t/f.dur;
-    ctx.save(); ctx.globalAlpha = k;
+    const u = f.t/f.dur, k = 1-u;
+    ctx.save();
     if(f.ring){
-      ctx.strokeStyle=f.col; ctx.lineWidth=3;
-      ctx.beginPath(); ctx.arc(f.x,f.y,lerp(f.r0,f.r1,f.t/f.dur),0,TAU); ctx.stroke();
+      // an expanding ring drawn as a wobbling carved circle
+      ctx.globalAlpha = k*0.9;
+      ctx.strokeStyle=f.col; ctx.lineWidth=3*k+0.8;
+      const r = lerp(f.r0,f.r1,u);
+      ctx.beginPath();
+      for(let i=0;i<=16;i++){
+        const a=(i/16)*TAU, rr=r*(0.95+0.05*Math.sin(a*4+f.t*9));
+        i?ctx.lineTo(f.x+Math.cos(a)*rr,f.y+Math.sin(a)*rr)
+         :ctx.moveTo(f.x+Math.cos(a)*rr,f.y+Math.sin(a)*rr);
+      }
+      ctx.closePath(); ctx.stroke();
     } else if(f.line){
-      ctx.strokeStyle=f.col; ctx.lineWidth=2.5;
-      ctx.beginPath(); ctx.moveTo(f.x1,f.y1); ctx.lineTo(f.x2,f.y2); ctx.stroke();
+      ctx.globalAlpha = k;
+      ctx.strokeStyle=f.col; ctx.lineWidth=2.8; ctx.lineCap='round';
+      // arc the chain rather than drawing a straight ruler line
+      const mx=(f.x1+f.x2)/2, my=(f.y1+f.y2)/2;
+      const nx=-(f.y2-f.y1)*0.16, ny=(f.x2-f.x1)*0.16;
+      ctx.beginPath(); ctx.moveTo(f.x1,f.y1);
+      ctx.quadraticCurveTo(mx+nx,my+ny,f.x2,f.y2); ctx.stroke();
     } else {
+      // ink speck: an elongated blot smeared along its own velocity
+      ctx.globalAlpha = k;
       ctx.fillStyle=f.col;
-      ctx.beginPath(); ctx.arc(f.x,f.y,f.r*k,0,TAU); ctx.fill();
+      const sp = Math.hypot(f.vx,f.vy);
+      ctx.translate(f.x,f.y);
+      ctx.rotate(sp > 6 ? Math.atan2(f.vy,f.vx) : (f.rot||0)+(f.spin||0)*f.t);
+      const stretch = 1 + Math.min(sp/90, 1.9);
+      ctx.beginPath();
+      ctx.ellipse(0,0, f.r*k*stretch, f.r*k*0.8, 0, 0, TAU);
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -1413,9 +2114,33 @@ function drawFloaters(){
   ctx.textAlign='left';
 }
 function drawVignette(){
-  const g = ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.35, W/2,H/2,Math.max(W,H)*0.78);
-  g.addColorStop(0,'rgba(60,44,24,0)'); g.addColorStop(1,'rgba(48,34,18,0.42)');
+  // ink pooling toward the edges of the impression
+  const g = ctx.createRadialGradient(W/2,H*0.46,Math.min(W,H)*0.30, W/2,H/2,Math.max(W,H)*0.76);
+  g.addColorStop(0,'rgba(60,44,24,0)');
+  g.addColorStop(0.65,'rgba(56,40,22,0.13)');
+  g.addColorStop(1,'rgba(44,30,16,0.46)');
   ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // a warm bloom at the centre, like light falling on the open page
+  const g2 = ctx.createRadialGradient(W*0.45,H*0.38,0, W*0.45,H*0.38,Math.max(W,H)*0.5);
+  g2.addColorStop(0,'rgba(255,246,220,0.16)'); g2.addColorStop(1,'rgba(255,246,220,0)');
+  ctx.fillStyle=g2; ctx.fillRect(0,0,W,H);
+}
+/* Laid over everything, including the UI, so the whole frame reads as one
+   printed sheet rather than shapes floating above a texture. */
+function drawGrain(){
+  if(!GRAIN) return;
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = GRAIN;
+  ctx.fillRect(0,0,W,H);
+  ctx.restore();
+  // plate mark: the impression the printing block leaves in the paper
+  ctx.save();
+  ctx.strokeStyle = 'rgba(70,52,28,0.30)'; ctx.lineWidth = 1;
+  ctx.strokeRect(7.5, 7.5, W-15, H-15);
+  ctx.strokeStyle = 'rgba(255,248,226,0.22)'; ctx.lineWidth = 1;
+  ctx.strokeRect(9.5, 9.5, W-19, H-19);
+  ctx.restore();
 }
 
 /* ================================================================== HUD */
@@ -1669,27 +2394,75 @@ function drawEnd(won){
 }
 
 /* ================================================================ MENU */
+/* A frontispiece, not a splash screen: ruled border, corner ornaments, and a
+   row of the actual creatures marching along the foot of the page. */
 function drawMenu(){
   ctx.save();
   ctx.fillStyle=PARCH; ctx.fillRect(0,0,W,H);
-  for(let i=0;i<40;i++){
-    ctx.fillStyle=`rgba(120,92,52,${0.02+((i*37)%7)*0.004})`;
-    ctx.beginPath(); ctx.arc((i*197)%W,(i*331)%H,20+((i*53)%70),0,TAU); ctx.fill();
-  }
-  ctx.textAlign='center';
-  ctx.fillStyle=INK; ctx.font='700 74px Georgia, serif';
-  ctx.fillText('VELLUM', W/2, H*0.34);
-  ctx.strokeStyle=RUBRIC; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(W/2-150,H*0.34+16); ctx.lineTo(W/2+150,H*0.34+16); ctx.stroke();
-  ctx.fillStyle=RUBRIC; ctx.font='italic 500 17px Georgia, serif';
-  ctx.fillText('you are writing the bestiary you are standing in', W/2, H*0.34+48);
-  ctx.fillStyle=INK2; ctx.font='500 13px Georgia, serif';
-  ctx.fillText('Every page you take makes you stronger and the orchard worse.', W/2, H*0.34+80);
-  ctx.fillText('What you write into the horde is the only thing it can drop.', W/2, H*0.34+102);
+  if(PAPER){ ctx.fillStyle=PAPER; ctx.fillRect(0,0,W,H); }
 
-  if(uiButton(W/2-110, H*0.62, 220, 46, 'ENTER THE FORGE')){ G.mode='forge'; }
-  ctx.fillStyle=INK2; ctx.font='500 11px Georgia, serif';
-  ctx.fillText('WASD move · mouse aims · F takes what you found · Esc pauses', W/2, H-40);
+  const M = Math.max(28, Math.min(W,H)*0.055);
+  const bx=M, by=M, bw=W-M*2, bh=H-M*2;
+  // double rule with a rubric hairline between
+  ctx.strokeStyle=INK; ctx.lineWidth=2.4; ctx.strokeRect(bx,by,bw,bh);
+  ctx.strokeStyle=RUBRIC; ctx.lineWidth=1; ctx.strokeRect(bx+6,by+6,bw-12,bh-12);
+  ctx.strokeStyle=INK; ctx.lineWidth=1; ctx.strokeRect(bx+11,by+11,bw-22,bh-22);
+  // corner ornaments — a carved leaf at each corner of the block
+  for(const [ox,oy,sx,sy] of [[bx,by,1,1],[bx+bw,by,-1,1],[bx,by+bh,1,-1],[bx+bw,by+bh,-1,-1]]){
+    ctx.save(); ctx.translate(ox,oy); ctx.scale(sx,sy);
+    ctx.strokeStyle=INK; ctx.lineWidth=2; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(4,26); ctx.quadraticCurveTo(4,4,26,4); ctx.stroke();
+    ctx.fillStyle=RUBRIC;
+    ctx.beginPath(); ctx.ellipse(13,13,5.5,3,-0.78,0,TAU); ctx.fill();
+    ctx.strokeStyle=INK; ctx.lineWidth=1.4;
+    ctx.beginPath(); ctx.moveTo(9,20); ctx.lineTo(20,9); ctx.stroke();
+    ctx.restore();
+  }
+
+  const cy = H*0.36;
+  ctx.textAlign='center';
+  // the title, with a soft ink halo so it sits in the page rather than on it
+  ctx.save();
+  ctx.shadowColor='rgba(40,28,14,0.28)'; ctx.shadowBlur=18; ctx.shadowOffsetY=2;
+  ctx.fillStyle=INK;
+  ctx.font='700 '+Math.round(Math.min(88, W*0.09))+'px Georgia, serif';
+  ctx.fillText('VELLUM', W/2, cy);
+  ctx.restore();
+  // rule with a diamond at the centre
+  const rw = Math.min(230, W*0.24);
+  ctx.strokeStyle=RUBRIC; ctx.lineWidth=1.6;
+  ctx.beginPath();
+  ctx.moveTo(W/2-rw, cy+18); ctx.lineTo(W/2-14, cy+18);
+  ctx.moveTo(W/2+14, cy+18); ctx.lineTo(W/2+rw, cy+18);
+  ctx.stroke();
+  ctx.fillStyle=RUBRIC;
+  ctx.beginPath();
+  ctx.moveTo(W/2,cy+13); ctx.lineTo(W/2+6,cy+18); ctx.lineTo(W/2,cy+23); ctx.lineTo(W/2-6,cy+18);
+  ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle=RUBRIC; ctx.font='italic 500 17px Georgia, serif';
+  ctx.fillText('you are writing the bestiary you are standing in', W/2, cy+50);
+  ctx.fillStyle=INK2; ctx.font='500 13px Georgia, serif';
+  ctx.fillText('Every page you take makes you stronger and the orchard worse.', W/2, cy+82);
+  ctx.fillText('What you write into the horde is the only thing it can drop.', W/2, cy+104);
+
+  if(uiButton(W/2-120, H*0.63, 240, 48, 'ENTER THE FORGE', RUBRIC)){ G.mode='forge'; }
+
+  // the horde, walking the bottom rule
+  if(ART_READY){
+    const fy = by+bh-42, kinds=['husk','creeper','husk','bloat','husk','creeper'];
+    const n = Math.max(4, Math.min(9, Math.floor(bw/120)));
+    for(let i=0;i<n;i++){
+      const k = kinds[i%kinds.length];
+      const set = SPR[k], img = set[(i*2)%set.length];
+      const sc = k==='bloat'?0.85:0.78;
+      ctx.save(); ctx.globalAlpha=0.30;
+      blit(img, bx+bw*((i+0.5)/n), fy, sc, i%2===0);
+      ctx.restore();
+    }
+  }
+  ctx.fillStyle=INK2; ctx.font='500 11px Georgia, serif'; ctx.textAlign='center';
+  ctx.fillText('WASD move · mouse aims · F takes what you found · Esc pauses', W/2, by+bh-9);
   ctx.restore();
 }
 
@@ -1897,6 +2670,7 @@ setInterval(()=>{
 }, 250);
 
 resize();
+bakeArt();     // must follow resize(): the paper patterns are made from ctx
 
 /* ============================================== headless test surface */
 window.step = step;
