@@ -1600,6 +1600,7 @@ function projectileBlocked(x,y,r){
 function updateProjectiles(dt){
   for(let i=G.projectiles.length-1;i>=0;i--){
     const q = G.projectiles[i];
+    const ox=q.x,oy=q.y;
     const stepd = q.spd*dt;
     q.x += Math.cos(q.a)*stepd; q.y += Math.sin(q.a)*stepd;
     q.travel += stepd; q.life += dt;
@@ -1620,7 +1621,7 @@ function updateProjectiles(dt){
         done = true;
       }
     } else {
-      if(projectileBlocked(q.x,q.y,q.r)){fx(q.x,q.y,INK2,3);done=true;}
+      if(projectileBlocked(q.x,q.y,q.r)||projectileBlocked((q.x+ox)/2,(q.y+oy)/2,q.r)){fx(q.x,q.y,INK2,3);done=true;}
       for(const e of done?[]:G.enemies){
         const rr = e.r+q.r;
         if(dist2(q.x,q.y,e.x,e.y) < rr*rr){
@@ -2649,9 +2650,9 @@ function spawnFormation(w,radius){
 function updateEnemyProjectiles(dt){
   const p=G.player;
   for(let i=G.eprojectiles.length-1;i>=0;i--){
-    const q=G.eprojectiles[i];q.life+=dt;q.x+=Math.cos(q.a)*q.spd*dt;q.y+=Math.sin(q.a)*q.spd*dt;
+    const q=G.eprojectiles[i],ox=q.x,oy=q.y;q.life+=dt;q.x+=Math.cos(q.a)*q.spd*dt;q.y+=Math.sin(q.a)*q.spd*dt;
     let done=q.life>=q.max;
-    if(!done)done=projectileBlocked(q.x,q.y,q.r);
+    if(!done)done=projectileBlocked(q.x,q.y,q.r)||projectileBlocked((q.x+ox)/2,(q.y+oy)/2,q.r);
     if(!done&&dist2(q.x,q.y,p.x,p.y)<(q.r+p.r)*(q.r+p.r)){hurtPlayer(q.dmg);done=true;}
     if(done){fx(q.x,q.y,RUBRIC,5);G.eprojectiles.splice(i,1);}
   }
