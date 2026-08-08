@@ -803,6 +803,8 @@ function loadSave(){
     if(!raw) return blankSave();
     const s = JSON.parse(raw);
     if(!s || !s.loadout) return blankSave();
+    if(!s.mats)s.mats={};
+    if(!Array.isArray(s.stash))s.stash=[];
     for(const k of MAT_IDS) if(typeof s.mats[k] !== 'number') s.mats[k]=0;
     if(!s.seen) s.seen = {};
     if(!s.seenEnemies)s.seenEnemies={};
