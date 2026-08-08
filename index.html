@@ -14,7 +14,7 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="hint">WASD move &nbsp;·&nbsp; E interact &nbsp;·&nbsp; mouse aim &nbsp;·&nbsp; F equip</div>
+<div id="hint">WASD move &nbsp;·&nbsp; E interact &nbsp;·&nbsp; mouse aim &nbsp;·&nbsp; Q skill &nbsp;·&nbsp; F equip &nbsp;·&nbsp; Esc pause</div>
 <script>
 "use strict";
 /* ============================================================================
@@ -854,6 +854,7 @@ const G = {
   doct:{grave:0,ember:0,oath:0},
   msg:null,
   forgeSel:null, forgeTab:'stash', craftSlot:'implement', craftKw:'ember', craftBase:'greatsword',
+  forgeMsg:null,
   townPlayer:{x:0,y:150,face:-Math.PI/2,walk:0}, townNear:null,
   townTarget:null,
   skills:{margin:0},
@@ -965,12 +966,14 @@ function implPower(){ const it = SV.loadout.implement; return it ? it.power : 1;
 /* ================================================================== ZONE */
 function buildOrchard(){
   G.trees.length = 0; G.blots.length = 0; G.walls.length = 0; G.landmarks.length=0;
+  const reserved=[[-920,-180],[760,-720],[-520,880],[940,690],[-1180,720],[0,-1380]];
   for(let i=0;i<210;i++){
     const a = rand(TAU), d = 260 + Math.sqrt(Math.random())*(WORLD-320);
     G.trees.push({ x:Math.cos(a)*d, y:Math.sin(a)*d, s: rand(1.15,0.62),
                    v: randi(5), flip: Math.random()<0.5 });
   }
   G.trees.sort((a,b)=>a.y-b.y);   // painter's order, fixed once
+  G.trees=G.trees.filter(t=>reserved.every(([x,y])=>dist2(t.x,t.y,x,y)>145*145));
   for(let i=0;i<60;i++){
     G.blots.push({ x:rand(WORLD*2,-WORLD), y:rand(WORLD*2,-WORLD), r:rand(90,26), a:rand(0.055,0.015) });
   }
@@ -981,6 +984,7 @@ function buildOrchard(){
     const a=rand(TAU),d=rand(WORLD-320,470),long=rand(220,120),thick=rand(34,22),vertical=Math.random()<0.5;
     const x=Math.cos(a)*d,y=Math.sin(a)*d;
     if(G.walls.some(o=>Math.hypot(o.x-x,o.y-y)<Math.max(long,o.w,o.h)+95))continue;
+    if(reserved.some(([rx,ry])=>dist2(x,y,rx,ry)<190*190))continue;
     const kind=pick(['trunk','trunk','roots','type']);
     G.walls.push({x,y,w:vertical?thick:long,h:vertical?long:thick,kind,hp:kind==='type'?90:999,maxhp:kind==='type'?90:999,seed:randi(9999)});
   }
@@ -994,7 +998,7 @@ function buildOrchard(){
   );
   for(let i=0;i<G.landmarks.length;i++){
     const L=G.landmarks[i],a=Math.atan2(L.y,L.x),n=-Math.sin(a),m=Math.cos(a);
-    L.marks=[.38,.62].map((k,j)=>({x:L.x*k+n*(j?34:-28),y:L.y*k+m*(j?34:-28),a,cut:(i+j)%3}));
+    L.marks=[{x:L.x*.56+n*(i%2?32:-26),y:L.y*.56+m*(i%2?32:-26),a,cut:i%3}];
   }
 }
 function regionAt(x,y){
@@ -1057,6 +1061,7 @@ const ENEMY_KINDS = {
 };
 function spawnRate(){
   const m = G.t/60;
+  if(G.t<2.5)return 0;
   let r = 1.6 + m*1.55 + Math.pow(m,1.7)*0.30;
   if(G.traits.swarm) r *= 1.33;
   return r;
@@ -2586,7 +2591,7 @@ function drawLandmarks(){
       // Bound branches form a recognisable orchard warden, never a UI cross.
       ctx.strokeStyle=INK3;ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(0,47);ctx.quadraticCurveTo(-5,-7,0,-41);ctx.moveTo(-3,-20);ctx.lineTo(-40,-45);ctx.moveTo(3,-20);ctx.lineTo(42,-47);ctx.stroke();
       ctx.lineWidth=3;for(const s of [-1,1]){ctx.beginPath();ctx.moveTo(s*22,-34);ctx.lineTo(s*28,-61);ctx.moveTo(s*33,-40);ctx.lineTo(s*49,-63);ctx.stroke();}
-      ctx.fillStyle=RUBRIC;ctx.beginPath();ctx.moveTo(0,-45);ctx.lineTo(-11,-28);ctx.lineTo(0,-9);ctx.lineTo(11,-28);ctx.closePath();ctx.fill();ctx.strokeStyle=PARCH3;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(-5,-28);ctx.lineTo(5,-28);ctx.stroke();
+      ctx.fillStyle=L.awake?INK2:RUBRIC;ctx.beginPath();ctx.moveTo(0,-45);ctx.lineTo(-11,-28);ctx.lineTo(0,-9);ctx.lineTo(11,-28);ctx.closePath();ctx.fill();ctx.strokeStyle=PARCH3;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(-5,-28);ctx.lineTo(5,-28);ctx.stroke();
     }
     ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='700 10px Georgia,serif';ctx.fillText(L.name,0,78);ctx.restore();
   }
@@ -2612,8 +2617,10 @@ function updateEnemyProjectiles(dt){
   for(let i=G.eprojectiles.length-1;i>=0;i--){
     const q=G.eprojectiles[i];q.life+=dt;q.x+=Math.cos(q.a)*q.spd*dt;q.y+=Math.sin(q.a)*q.spd*dt;
     let done=q.life>=q.max;
-    if(!done&&dist2(q.x,q.y,p.x,p.y)<(q.r+p.r)*(q.r+p.r)){hurtPlayer(q.dmg);done=true;}
     if(!done){for(const w of G.walls)if(q.x>w.x-w.w/2&&q.x<w.x+w.w/2&&q.y>w.y-w.h/2&&q.y<w.y+w.h/2){done=true;break;}}
+    if(!done){for(const t of G.trees)if(dist2(q.x,q.y,t.x,t.y)<Math.pow(12*t.s+q.r,2)){done=true;break;}}
+    if(!done){for(const L of G.landmarks){const cr=L.kind==='press'?58:L.kind==='well'?46:L.kind==='nest'?35:L.kind==='effigy'?24:0;if(cr&&dist2(q.x,q.y,L.x,L.y+12)<Math.pow(cr+q.r,2)){done=true;break;}}}
+    if(!done&&dist2(q.x,q.y,p.x,p.y)<(q.r+p.r)*(q.r+p.r)){hurtPlayer(q.dmg);done=true;}
     if(done){fx(q.x,q.y,RUBRIC,5);G.eprojectiles.splice(i,1);}
   }
   for(const q of G.eprojectiles){
@@ -2788,10 +2795,13 @@ function drawEnd(won){
   ctx.font='500 11px Georgia, serif'; ctx.fillStyle = won?INK2:PARCH3;
   ctx.fillText('THE PAGE YOU WROTE', W/2, H*0.47);
   let y = H*0.47+22;
-  for(const c of G.cards){
-    ctx.fillStyle = won?INK:PARCH; ctx.font='600 13px Georgia, serif';
-    ctx.fillText(c.name + ' — ' + c.curse.replace('…and ',''), W/2, y); y+=20;
+  const pageCols=G.cards.length>6?2:1,pageRows=Math.ceil(G.cards.length/pageCols),pageGap=Math.min(330,W*.28);
+  for(let i=0;i<G.cards.length;i++){
+    const c=G.cards[i],col=Math.floor(i/pageRows),row=i%pageRows,px=pageCols===1?W/2:W/2+(col?1:-1)*pageGap;
+    ctx.fillStyle = won?INK:PARCH; ctx.font='600 12px Georgia, serif';
+    ctx.fillText(c.name+'  ·  '+c.trait.toUpperCase(),px,y+row*18);
   }
+  y += pageRows*18;
   y += 14;
   ctx.font='500 11px Georgia, serif'; ctx.fillStyle = won?INK2:PARCH3;
   ctx.fillText('CARRIED HOME', W/2, y); y+=20;
@@ -2955,8 +2965,10 @@ function resolveCircleBody(o,r,cx,cy,cr){
   const push=min-d;o.x+=dx/d*push;o.y+=dy/d*push;
 }
 function resolveWorldCollision(o,r){
-  for(const t of G.trees) if(Math.abs(t.x-o.x)<45&&Math.abs(t.y-o.y)<45) resolveCircleBody(o,r,t.x,t.y,11*t.s);
+  const threadsRoots=o.kind==='rootling';
+  if(!threadsRoots)for(const t of G.trees) if(Math.abs(t.x-o.x)<45&&Math.abs(t.y-o.y)<45) resolveCircleBody(o,r,t.x,t.y,11*t.s);
   for(const w of G.walls){
+    if(threadsRoots&&w.kind==='roots')continue;
     const l=w.x-w.w/2-r,rr=w.x+w.w/2+r,t=w.y-w.h/2-r,b=w.y+w.h/2+r;
     if(o.x>l&&o.x<rr&&o.y>t&&o.y<b){
       const dl=o.x-l,dr=rr-o.x,dt=o.y-t,db=b-o.y,m=Math.min(dl,dr,dt,db);
@@ -2970,7 +2982,7 @@ function resolveWorldCollision(o,r){
 }
 function townInteract(){
   const s=G.townNear; if(!s)return;
-  if(s.id==='forge') G.mode='forge';
+  if(s.id==='forge'){G.forgeMsg=null;G.mode='forge';}
   if(s.id==='gate') startRun();
   if(s.id==='archive'){G.archivePage=0;G.mode='archive';}
 }
@@ -2995,6 +3007,10 @@ function drawTown(){
   townBuilding(-285,-20,170,132,'INK-FORGE',RUBRIC);
   townBuilding(0,-195,184,100,'BESTIARY',BLUEIN);
   townBuilding(285,-20,170,132,'ORCHARD GATE',VERD);
+  ctx.textAlign='center';ctx.font='700 9px Georgia,serif';
+  ctx.fillStyle=RUBRIC;ctx.fillText(SV.stash.length+' STORED  ·  '+SLOTS.filter(s=>SV.loadout[s]).length+' WORN',-285,64);
+  ctx.fillStyle=BLUEIN;ctx.fillText(Object.keys(SV.seen).length+' / '+CARDS.length+' PAGES RECORDED',0,-126);
+  ctx.fillStyle=VERD;ctx.fillText(SV.wins+' WARDENS  ·  BEST '+fmtTime(SV.best),285,64);
   // Shelves, material jars, fencing, and page-lamps make this a worked-in place.
   ctx.strokeStyle=INK2;ctx.lineWidth=2;
   for(const x of [-390,390])for(let y=-170;y<170;y+=34){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+(x<0?28:-28),y+8);ctx.stroke();}
@@ -3002,6 +3018,11 @@ function drawTown(){
     const x=-365+i*36,y=120;ctx.fillStyle=[RUBRIC2,BLUEIN,GOLD,VERD][i];ctx.globalAlpha=0.75;ctx.fillRect(x-8,y-16,16,22);ctx.globalAlpha=1;ctx.strokeStyle=INK;ctx.strokeRect(x-8,y-16,16,22);
   }
   for(const x of [-155,155]){ctx.strokeStyle=INK;ctx.beginPath();ctx.moveTo(x,95);ctx.lineTo(x,150);ctx.stroke();ctx.fillStyle=GOLD;ctx.beginPath();ctx.arc(x,88,7,0,TAU);ctx.fill();}
+  // The Binder makes the Forge feel inhabited while reusing the same carved
+  // anatomy as the player instead of introducing a mismatched portrait style.
+  const keeperFrame=((G.frame/22)|0)%SPR.scribe.length;blit(SPR.scribe[keeperFrame],-205,62,.82,true);
+  ctx.strokeStyle=INK3;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-194,43);ctx.lineTo(-181,58);ctx.stroke();ctx.fillStyle=RUBRIC;ctx.fillRect(-186,50,10,6);
+  ctx.textAlign='center';ctx.fillStyle=RUBRIC;ctx.font='700 8px Georgia,serif';ctx.fillText('THE BINDER',-205,79);
   ctx.strokeStyle=INK2;ctx.lineWidth=2;ctx.setLineDash([7,6]);
   ctx.beginPath();ctx.moveTo(-190,80);ctx.quadraticCurveTo(0,150,190,80);ctx.stroke();ctx.setLineDash([]);
   const p=G.townPlayer, f=((p.walk*7)|0)%SPR.scribe.length;
@@ -3030,6 +3051,7 @@ function drawTown(){
 /* =============================================================== FORGE */
 function uiButton(x,y,w,h,label,col,small){
   const hov = mouse.x>x&&mouse.x<x+w&&mouse.y>y&&mouse.y<y+h;
+  if(hov)canvas.style.cursor='pointer';
   ctx.save();
   ctx.fillStyle = hov?PARCH3:PARCH2; ctx.fillRect(x,y,w,h);
   ctx.strokeStyle = col||INK; ctx.lineWidth = hov?2.6:1.6; ctx.strokeRect(x+1,y+1,w-2,h-2);
@@ -3060,7 +3082,7 @@ function drawArchive(){
   ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText('THE BESTIARY  ·  PAGE '+(i+1)+' OF '+CARDS.length,W/2,y+38);
   ctx.fillStyle=known?INK:'rgba(60,48,32,.42)';ctx.font='700 30px Georgia,serif';ctx.fillText(known?c.name:'AN UNWRITTEN PAGE',W/2,y+84);
   ctx.strokeStyle=known?MATERIALS[c.mat].col:INK2;ctx.beginPath();ctx.moveTo(x+70,y+105);ctx.lineTo(x+bw-70,y+105);ctx.stroke();
-  if(known){const dk=MATERIALS[c.mat].kw;ctx.textAlign='left';ctx.fillStyle=VERD;ctx.font='700 12px Georgia,serif';ctx.fillText('THE GIFT',x+64,y+146);wrap(c.boon,x+64,y+174,bw-128,20,INK,'500 15px Georgia,serif');ctx.fillStyle=RUBRIC;ctx.font='700 12px Georgia,serif';ctx.fillText('WHAT IT WRITES INTO THE HORDE',x+64,y+246);wrap(c.curse,x+64,y+274,bw-128,20,RUBRIC,'italic 500 15px Georgia,serif');ctx.fillStyle=MATERIALS[c.mat].col;ctx.font='700 13px Georgia,serif';ctx.fillText('MATERIAL OPENED  ·  '+MATERIALS[c.mat].name.toUpperCase(),x+64,y+360);ctx.fillStyle=INK2;ctx.font='500 12px Georgia,serif';ctx.fillText('Use this material at the Ink-Forge to inscribe '+(dk?DOCTRINES[dk].name.toLowerCase():'unbound')+' gear.',x+64,y+387);}else{ctx.fillStyle=INK2;ctx.font='italic 15px Georgia,serif';ctx.fillText('Choose this page during a descent to preserve its law here.',W/2,y+220);ctx.strokeStyle='rgba(60,48,32,.25)';for(let n=0;n<7;n++){ctx.beginPath();ctx.moveTo(x+90,y+270+n*24);ctx.lineTo(x+bw-90,y+270+n*24);ctx.stroke();}}
+  if(known){const dk=MATERIALS[c.mat].kw;ctx.textAlign='left';ctx.fillStyle=VERD;ctx.font='700 12px Georgia,serif';ctx.fillText('THE GIFT',x+64,y+146);wrap(c.boon,x+64,y+174,bw-128,20,INK,'500 15px Georgia,serif');ctx.fillStyle=RUBRIC;ctx.font='700 12px Georgia,serif';ctx.fillText('WHAT IT WRITES INTO THE HORDE',x+64,y+246);wrap(c.curse,x+64,y+274,bw-128,20,RUBRIC,'italic 500 15px Georgia,serif');ctx.fillStyle=MATERIALS[c.mat].col;ctx.font='700 13px Georgia,serif';ctx.fillText('MATERIAL OPENED  ·  '+MATERIALS[c.mat].name.toUpperCase(),x+64,y+360);ctx.fillStyle=INK2;ctx.font='500 12px Georgia,serif';ctx.fillText('Use this material at the Ink-Forge to inscribe '+(dk?DOCTRINES[dk].name.toLowerCase():'unbound')+' gear.',x+64,y+387);ctx.fillStyle=MATERIALS[c.mat].col;ctx.font='700 11px Georgia,serif';ctx.fillText('CURRENTLY HELD  ·  '+SV.mats[c.mat],x+64,y+414);}else{ctx.fillStyle=INK2;ctx.font='italic 15px Georgia,serif';ctx.fillText('Choose this page during a descent to preserve its law here.',W/2,y+220);ctx.strokeStyle='rgba(60,48,32,.25)';for(let n=0;n<7;n++){ctx.beginPath();ctx.moveTo(x+90,y+270+n*24);ctx.lineTo(x+bw-90,y+270+n*24);ctx.stroke();}}
   if(uiButton(x+34,y+bh-62,100,32,'← PREVIOUS',INK2,true))G.archivePage=(i+CARDS.length-1)%CARDS.length;
   if(uiButton(x+bw-134,y+bh-62,100,32,'NEXT →',INK2,true))G.archivePage=(i+1)%CARDS.length;
   ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Arrow keys turn pages  ·  Esc returns to town',W/2,y+bh-34);ctx.restore();
@@ -3076,6 +3098,7 @@ function drawForge(){
   ctx.textAlign='right';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Esc — return to the Scriptorium',W-34,52);ctx.textAlign='left';
   ctx.fillStyle=RUBRIC; ctx.font='italic 500 13px Georgia, serif';
   ctx.fillText('runs '+SV.runs+'  ·  wardens felled '+SV.wins+'  ·  longest '+fmtTime(SV.best), 34, 74);
+  if(G.forgeMsg){ctx.textAlign='right';ctx.fillStyle=VERD;ctx.font='700 12px Georgia,serif';ctx.fillText(G.forgeMsg,W-34,76);ctx.textAlign='left';}
 
   // materials strip
   let mx = 34;
@@ -3192,7 +3215,7 @@ function drawForge(){
       const can = SV.mats[mat] >= cost;
       if(uiButton(bx, by, 108, 34, RARITY[r].name+'  '+cost, can?RARITY[r].col:'rgba(60,48,32,0.35)') && can){
         SV.mats[mat] -= cost;
-        SV.stash.push(makeItem(G.craftSlot, r, G.craftKw, G.craftBase));
+        const made=makeItem(G.craftSlot, r, G.craftKw, G.craftBase);SV.stash.push(made);G.forgeMsg='INSCRIBED  ·  '+made.name.toUpperCase();
         persist();
       }
       bx += 114;
@@ -3243,6 +3266,7 @@ function frame(ts){
   if(dt > 0.25) dt = 0.25;          // tab was away — never simulate the gap
   lastFrameAt = now;
   step(dt);
+  canvas.style.cursor=G.mode==='run'?'crosshair':G.mode==='town'?'crosshair':'default';
   draw();
   mouse.clicked = false;
   requestAnimationFrame(frame);
