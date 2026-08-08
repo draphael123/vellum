@@ -178,6 +178,8 @@ were structural rather than numerical, and are worth knowing:
   density, contrast, and role-based threat cues. The first-run guide can be
   replayed there. Audio is synthesized at runtime from paper noise, wooden
   impacts, rubric tones, and Warden drones; there are no external samples.
+- Page Motion also governs page-turn transitions, defaults off when a device
+  requests reduced motion, and focus loss safely pauses the run and releases input.
 - Touch play uses a left drag for movement, right drag for aiming, the active
   inscription plate as its skill button, and explicit Return/Continue controls
   throughout town screens. Found gear also has a clickable take action.
