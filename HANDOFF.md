@@ -95,6 +95,12 @@ kills); the Warden spawns, cycles all four attack states, phases at 50%, and
 dies; `draw()` is clean in all seven modes; ~1.2–1.5 ms/frame at 420 enemies, so
 there is a lot of perf headroom.
 
+The August polish pass also completed a staged full-zone smoke through 8:04:
+all nine regular creature species were encountered, the Warden spawned, all
+twelve manuscript pages remained reachable, rotating formations continued past
+400 kills, projectile cover stayed active, and cleanup kept the active pools
+bounded. This is systems verification, not a substitute for a balance playtest.
+
 **Balance is UNVALIDATED and should not be tuned from a bot.** A scripted kiting
 policy produced a 235–6167 kill spread across six runs. It can confirm systems
 fire; it cannot tell you whether the game is fun or fair. Two fixes already made
