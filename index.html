@@ -1199,7 +1199,6 @@ function spawnBoss(){
   };
   G.bossIntro=3.6;G.bossChapter='THE FINAL CLAUSE';
   if(!SV.seenEnemies.warden){SV.seenEnemies.warden=true;persist();}
-  say('THE ORCHARD-WARDEN', 'it has read every page you wrote');
   sfx('boss');
   G.shake = 16;
 }
@@ -1209,7 +1208,6 @@ function updateBoss(dt){
   if(b.burn>0){ b.burn -= dt; b.hp -= 26*dt; }
   if(b.phase===1 && b.hp < b.maxhp*0.5){
     b.phase=2; b.spd*=1.35; b.atkCd=2.1; G.shake=14;
-    say('IT REMEMBERS THE THORNS');
     sfx('phase');
     G.bossIntro=2.4;G.bossChapter='SECOND IMPRESSION  ·  THE THORNS REMEMBER';
   }
@@ -2609,7 +2607,7 @@ function drawHud(){
   const equippedSkill=activeSkillId();
   const skillIds=equippedSkill?[equippedSkill]:[],box=108,gap=0,total=box,x0=W/2-total/2;
   for(let i=0;i<skillIds.length;i++){
-    const id=skillIds[i],S=SKILLS[id],cd=G.skills[id]||0,x=x0+i*(box+gap),y=H-54;
+    const id=skillIds[i],S=SKILLS[id],cd=G.skills[id]||0,x=x0+i*(box+gap),y=H-(G.boss?120:54);
     ctx.fillStyle='rgba(230,217,184,0.82)';ctx.fillRect(x,y,box,38);ctx.strokeStyle=cd>0?INK2:S.col;ctx.lineWidth=cd>0?1:2;ctx.strokeRect(x,y,box,38);
     if(cd>0){ctx.fillStyle='rgba(28,23,18,0.20)';ctx.fillRect(x,y,box*(cd/S.cd),38);}
     ctx.textAlign='left';ctx.fillStyle=S.col;ctx.font='700 12px Georgia,serif';ctx.fillText(S.key,x+7,y+15);
@@ -2813,6 +2811,18 @@ function drawCompare(){
   ctx.restore();
 }
 
+function pageBuildRead(c){
+  const base=SV.loadout.implement?.base,kw=MATERIALS[c.mat||'heartwood'].kw;
+  if(c.id==='needlehand'&&base==='longbow')return ['LONGBOW SYNERGY',RUBRIC];
+  if(c.id==='emberbrand'&&base==='censer')return ['BLACK BLOOM SYNERGY',BLUEIN];
+  if(c.id==='pallscript'&&base==='greatsword')return ['SWEEP CONTROL',INK2];
+  if(c.id==='thornwrit')return ['ATTACK CADENCE',RUBRIC];
+  if(c.id==='rootledger')return ['POSITIONING',VERD];
+  if(kw&&G.doct[kw]>0)return ['EXTENDS '+DOCTRINES[kw].name.toUpperCase()+' '+G.doct[kw]+'/3',DOCTRINES[kw].col];
+  if(c.id==='oathmark'||c.id==='ironbark')return ['SURVIVAL',GOLD];
+  return ['NEW FORGE LINE',MATERIALS[c.mat||'heartwood'].col];
+}
+
 function drawLevelUp(){
   ctx.save();
   ctx.fillStyle='rgba(230,217,184,0.90)'; ctx.fillRect(0,0,W,H);
@@ -2846,9 +2856,11 @@ function drawLevelUp(){
     ctx.strokeStyle=INK2; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(x+24,y+70); ctx.lineTo(x+cw-24,y+70); ctx.stroke();
 
+    const read=pageBuildRead(c);ctx.fillStyle=read[1];ctx.font='700 9px Georgia,serif';ctx.fillText(read[0],x+cw/2,y+86);
+
     ctx.textAlign='left';
-    wrap(c.boon, x+20, y+94, cw-40, 16, INK, '500 13px Georgia, serif');
-    const yy = y+94 + wrapH(c.boon, cw-40, 16, '500 13px Georgia, serif') + 14;
+    wrap(c.boon, x+20, y+108, cw-40, 16, INK, '500 13px Georgia, serif');
+    const yy = y+108 + wrapH(c.boon, cw-40, 16, '500 13px Georgia, serif') + 14;
     wrap(c.curse, x+20, yy, cw-40, 16, RUBRIC, 'italic 500 13px Georgia, serif');
 
     ctx.textAlign='center';
