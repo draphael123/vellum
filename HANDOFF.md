@@ -137,7 +137,8 @@ were structural rather than numerical, and are worth knowing:
 - Three later-run enemy roles were added: rootlings, needlekin, and bellowers.
 - Three additional Orchard roles broaden the first zone: Inkspitters telegraph
   ranged quills, Broodpods split into Rootlings, and Stumpguards act as durable
-  moving walls. Their arrivals begin around minutes 2, 4.4, and 6 respectively.
+  moving walls. The first minute now mixes husks, creepers, bloats, and rootlings;
+  specialist roles enter in later readable chapters.
 - Material drops now name themselves in-world when collected from a kill.
 - One fixed active ability establishes the baseline without creating another
   progression track: `Q` Margin Cut drives the surrounding crowd outward. It
@@ -147,9 +148,18 @@ were structural rather than numerical, and are worth knowing:
   now create lanes and funnels. Collision is deliberately soft to avoid jams.
 - The combat HUD now uses Doctrine seals, skill cooldown plates, an in-world
   ward recharge ring, and a staged first-run tutorial.
-- The Orchard is one mechanical zone with six visual districts, five authored
-  landmarks, rotating formation waves, and rare gilded elites. This creates
+- The Orchard is one mechanical zone with six visual districts, six authored
+  interactive landmarks, rotating formation waves, and rare gilded elites. This creates
   exploration and encounter diversity without adding a second material line.
+- The Bestiary building now opens a twelve-page archive. Pages remain veiled
+  until selected during a run, then preserve their gift, curse, material, and
+  Forge relationship for later reference.
+- Persistent reading options cover impact shake, particle density, contrast,
+  and role-based threat cues. The first-run guide can be replayed there.
+- Fallen timber, exposed roots, and destructible letterpress type replace the
+  old geometric wall placeholders. Trail marks lead toward major clearings.
+- The Broken Press is a repeatable combat hazard; the Black Well condenses XP;
+  the Last Desk heals once; the Root Brood and Warden Effigy create field events.
 - Page selection now resolves with a short transformation stamp showing the
   horde trait and its material colour. Player damage has an edge impression.
 - Newer creature families have baked silhouette additions rather than relying
@@ -167,6 +177,6 @@ were structural rather than numerical, and are worth knowing:
 4. **A fourth implement**, and a second Doctrine tier at 7 keywords.
 5. Mobile / touch controls. Currently keyboard + mouse only.
 
-Things deliberately **not** built: enemy variety beyond three kinds, run modifiers,
-meta skill tree (rejected — it would be a third progression system), any art
-assets (everything is drawn in code, and should stay that way).
+Things deliberately **not** built: Zone 2, audio, run modifiers,
+meta skill tree (rejected — it would be a third progression system), or external
+art assets (everything is drawn in code, and should stay that way).

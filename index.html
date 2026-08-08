@@ -793,6 +793,7 @@ function blankSave(){
     loadout:{implement:start, mantle:null, bracers:null, talisman:null},
     runs:0, wins:0, best:0, townSeen:false, tutorialDone:false,
     seen:{},          // bestiary pages ever inscribed
+    settings:{shake:true,particles:true,contrast:false,threatCues:true},
   };
 }
 function loadSave(){
@@ -804,6 +805,7 @@ function loadSave(){
     for(const k of MAT_IDS) if(typeof s.mats[k] !== 'number') s.mats[k]=0;
     if(!s.seen) s.seen = {};
     if(typeof s.tutorialDone!=='boolean') s.tutorialDone=false;
+    s.settings=Object.assign({shake:true,particles:true,contrast:false,threatCues:true},s.settings||{});
     // keep uid counter ahead of anything loaded
     const all = s.stash.concat(SLOTS.map(x=>s.loadout[x]).filter(Boolean));
     for(const it of all){
@@ -832,7 +834,7 @@ function resize(){
 window.addEventListener('resize', resize);
 
 const G = {
-  mode:'menu',            // menu | town | forge | run | levelup | dead | victory | paused
+  mode:'menu',            // menu | town | forge | archive | settings | run | levelup | dead | victory | paused
   t:0, dt:0, frame:0,
   cam:{x:0,y:0},
   shake:0,
@@ -857,6 +859,8 @@ const G = {
   tutorial:false,
   region:'THE RULED GROVE', regionT:0,
   inscribeFlash:null,
+  returnMode:'menu', archivePage:0,
+  announced:{},
 };
 window.G = G;
 
@@ -867,6 +871,8 @@ addEventListener('keydown', e=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   keys[e.key.toLowerCase()] = true;
   if(e.key === 'Escape') togglePause();
+  if(e.key.toLowerCase()==='o'&&!e.repeat&&['menu','town','paused'].includes(G.mode)){G.returnMode=G.mode;G.mode='settings';}
+  if(G.mode==='archive'&&!e.repeat){if(e.key==='ArrowLeft')G.archivePage=(G.archivePage+CARDS.length-1)%CARDS.length;if(e.key==='ArrowRight')G.archivePage=(G.archivePage+1)%CARDS.length;}
   if(e.key.toLowerCase() === 'e' && G.mode === 'town') townInteract();
   if(G.mode === 'run' && !e.repeat){
     const id=activeSkillId();
@@ -892,6 +898,8 @@ function togglePause(){
   if(G.mode === 'run') G.mode = 'paused';
   else if(G.mode === 'paused') G.mode = 'run';
   else if(G.mode === 'forge') G.mode = 'town';
+  else if(G.mode === 'archive') G.mode = 'town';
+  else if(G.mode === 'settings') G.mode = G.returnMode||'menu';
 }
 const mouseWorld = () => ({ x: mouse.x - W/2 + G.cam.x, y: mouse.y - H/2 + G.cam.y });
 
@@ -976,13 +984,17 @@ function buildOrchard(){
     G.walls.push({x,y,w:vertical?thick:long,h:vertical?long:thick,kind,hp:kind==='type'?90:999,maxhp:kind==='type'?90:999,seed:randi(9999)});
   }
   G.landmarks.push(
-    {kind:'press',x:-920,y:-180,name:'THE BROKEN PRESS'},
+    {kind:'press',x:-920,y:-180,name:'THE BROKEN PRESS',cd:0},
     {kind:'folio',x:760,y:-720,name:'THE HANGING FOLIO'},
     {kind:'well',x:-520,y:880,name:'THE BLACK WELL',charge:0},
     {kind:'camp',x:940,y:690,name:'THE LAST DESK',used:false},
     {kind:'nest',x:-1180,y:720,name:'THE ROOT BROOD',opened:false},
     {kind:'effigy',x:0,y:-1380,name:'THE WARDEN EFFIGY'}
   );
+  for(let i=0;i<G.landmarks.length;i++){
+    const L=G.landmarks[i],a=Math.atan2(L.y,L.x),n=-Math.sin(a),m=Math.cos(a);
+    L.marks=[.38,.62].map((k,j)=>({x:L.x*k+n*(j?34:-28),y:L.y*k+m*(j?34:-28),a,cut:(i+j)%3}));
+  }
 }
 function regionAt(x,y){
   if(Math.hypot(x,y)<520)return 'THE RULED GROVE';
@@ -1006,6 +1018,7 @@ function startRun(){
   G.skills={}; for(const id of Object.keys(SKILLS)) G.skills[id]=0;
   G.tutorial=!SV.tutorialDone;
   G.region='THE RULED GROVE';G.regionT=0;
+  G.announced={};
   G.player = makePlayer();
   G.cam.x=0; G.cam.y=0; G.shake=0;
   buildOrchard();
@@ -1050,14 +1063,14 @@ function spawnRate(){
 function pickKind(){
   const m = G.t/60;
   const r = Math.random();
-  if(m > 6.0 && r < 0.07) return 'stumpguard';
-  if(m > 4.4 && r < 0.14) return 'inkspitter';
-  if(m > 2.0 && r < 0.21) return 'broodpod';
-  if(m > 5.2 && r < (G.traits.choir?0.16:0.10)) return 'bellower';
-  if(m > 3.0 && r < (G.traits.needles?0.25:0.18)) return 'needlekin';
-  if(m > 1.2 && r < (G.traits.roots?0.34:0.25)) return 'rootling';
-  if(m > 2.2 && r < 0.30) return 'creeper';
-  if(m > 3.8 && r < 0.42) return 'bloat';
+  if(m > 5.8 && r < 0.05) return 'stumpguard';
+  if(m > 3.4 && r < 0.10) return 'inkspitter';
+  if(m > 2.0 && r < 0.15) return 'broodpod';
+  if(m > 4.5 && r < (G.traits.choir?0.20:0.13)) return 'bellower';
+  if(m > 2.6 && r < (G.traits.needles?0.26:0.20)) return 'needlekin';
+  if(m > 0.75 && r < (G.traits.roots?0.33:0.27)) return 'rootling';
+  if(m > 0.55 && r < 0.39) return 'bloat';
+  if(m > 0.18 && r < 0.64) return 'creeper';
   return 'husk';
 }
 function spawnEnemy(kind, x, y){
@@ -1081,6 +1094,11 @@ function spawnEnemy(kind, x, y){
   };
   if(natural&&m>2.5&&Math.random()<0.028){e.elite=true;e.hp*=2.1;e.maxhp=e.hp;e.r*=1.18;e.dmg*=1.35;e.xp*=3;}
   G.enemies.push(e);
+  if(natural&&!G.announced[kind]&&kind!=='husk'){
+    G.announced[kind]=true;
+    const intro={creeper:['CREEPERS ENTER','fast pursuers; turn them through cover'],bloat:['BLOATS ENTER','slow bodies that divide the path'],rootling:['ROOTLINGS ENTER','small runners slip through narrow gaps'],needlekin:['NEEDLEKIN ENTER','watch the edge of the crush'],bellower:['BELLOWERS ENTER','support voices quicken nearby enemies'],inkspitter:['INKSPITTERS ENTER','the red line warns where the quill will land'],broodpod:['BROODPODS ENTER','opened pods become a knot of runners'],stumpguard:['STUMPGUARDS ENTER','armoured bodies anchor the horde']}[kind];
+    if(intro)say(intro[0],intro[1]);
+  }
   return e;
 }
 function spawnRing(n, radius){
@@ -1338,6 +1356,7 @@ function hurtPlayer(n){
 /* Death isn't a puff of dots — the creature un-prints, throwing ink specks
    that stretch along their travel like flicked-off a brush. */
 function fx(x,y,col,n){
+  if(!SV.settings.particles)n=Math.min(3,n);
   for(let i=0;i<n;i++){
     const a=rand(TAU), s=rand(170,35);
     G.fx.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,dur:rand(0.75,0.25),col,
@@ -1815,9 +1834,12 @@ function updatePickups(dt){
   }
   for(const L of G.landmarks){
     const near=dist2(p.x,p.y,L.x,L.y);
+    if(!L.discovered&&near<150*150){L.discovered=true;floater('LANDMARK RECORDED',L.x,L.y-72,BLUEIN);}
     if(L.kind==='camp'&&!L.used&&near<88*88&&p.hp<p.maxhp){L.used=true;p.hp=Math.min(p.maxhp,p.hp+Math.max(24,p.maxhp*.35));say('THE LAST DESK','a sealed ration restores the scribe');fx(L.x,L.y,GOLD2,14);}
     if(L.kind==='folio'&&!L.read&&near<105*105){L.read=true;say('THE HANGING FOLIO','its torn map names every district');G.regionT=7;}
     if(L.kind==='nest'&&!L.opened&&near<150*150){L.opened=true;say('THE ROOT BROOD','something answers beneath the binding');spawnEnemy('broodpod',L.x,L.y);for(let n=0;n<4;n++){const a=n/4*TAU;spawnEnemy(n%2?'rootling':'stumpguard',L.x+Math.cos(a)*72,L.y+Math.sin(a)*72);}}
+    if(L.kind==='press'&&near<250*250){L.cd-=dt;if(L.cd<=0){L.cd=6;let hit=0;for(const e of G.enemies){if(dist2(e.x,e.y,L.x,L.y)<230*230){damageEnemy(e,28*implPower(),80);hit++;}}if(hit){burst(L.x,L.y,230,'press');say('THE BROKEN PRESS','its platen falls across the clearing');}}}
+    if(L.kind==='effigy'&&!L.awake&&near<130*130){L.awake=true;p.ward=true;p.wardT=0;const e=spawnEnemy('stumpguard',L.x,L.y+95);if(e){e.elite=true;e.hp*=2;e.maxhp=e.hp;e.xp*=3;}say('THE WARDEN EFFIGY','a ward is granted; its keeper wakes');}
   }
 }
 
@@ -1843,12 +1865,16 @@ function draw(){
   if(G.mode === 'menu'){ drawMenu(); ctx.restore(); drawGrain(); return; }
   if(G.mode === 'town'){ drawTown(); ctx.restore(); drawGrain(); return; }
   if(G.mode === 'forge'){ drawForge(); ctx.restore(); drawGrain(); return; }
+  if(G.mode === 'archive'){ drawArchive(); ctx.restore(); drawGrain(); return; }
+  if(G.mode === 'settings'){ drawSettings(); ctx.restore(); drawGrain(); return; }
 
-  const sx = G.shake ? rand(G.shake,-G.shake) : 0;
-  const sy = G.shake ? rand(G.shake,-G.shake) : 0;
+  const shake=SV.settings.shake?G.shake:0;
+  const sx = shake ? rand(shake,-shake) : 0;
+  const sy = shake ? rand(shake,-shake) : 0;
   ctx.translate(W/2 - G.cam.x + sx, H/2 - G.cam.y + sy);
 
   drawGround();
+  drawWaymarks();
   drawLandmarks();
   drawBarriers();
   drawPools();
@@ -2012,6 +2038,10 @@ function drawEnemies(){
     const heavy=e.kind==='bloat'||e.kind==='bellower'||e.kind==='broodpod'||e.kind==='stumpguard';
     const sc = e.r/12 * (heavy ? 0.92 : 1);
     const flip = G.player.x < e.x;
+    if(SV.settings.threatCues&&['inkspitter','bellower','broodpod','stumpguard'].includes(e.kind)){
+      const cue=e.kind==='inkspitter'?RUBRIC:e.kind==='bellower'?GOLD:e.kind==='broodpod'?VERD:INK2;
+      ctx.save();ctx.globalAlpha=.25;ctx.strokeStyle=cue;ctx.lineWidth=1.5;ctx.setLineDash([3,5]);ctx.beginPath();ctx.arc(e.x,e.y,e.r+11+(Math.sin(G.t*3+e.wob)+1)*2,0,TAU);ctx.stroke();ctx.restore();
+    }
     // shadow grounds them; without it the horde floats
     ctx.fillStyle = 'rgba(48,36,20,0.14)';
     ctx.beginPath(); ctx.ellipse(e.x, e.y+e.r*0.72, e.r*0.8, e.r*0.28, 0, 0, TAU); ctx.fill();
@@ -2427,7 +2457,8 @@ function drawHud(){
   // kills + materials
   ctx.textAlign='right'; ctx.font='600 12px Georgia, serif'; ctx.fillStyle=INK;
   ctx.fillText(G.kills + ' felled', W-20, 32);
-  let my = 52;
+  ctx.fillStyle=INK2;ctx.font='500 10px Georgia,serif';ctx.fillText(G.landmarks.filter(L=>L.discovered).length+' / '+G.landmarks.length+' landmarks',W-20,48);
+  let my = 66;
   for(const k of MAT_IDS){
     const v = G.runMats[k]||0; if(!v) continue;
     ctx.fillStyle = MATERIALS[k].col;
@@ -2490,10 +2521,11 @@ function drawHud(){
     ctx.fillStyle=MATERIALS[c.mat||'heartwood'].col;ctx.font='600 9px Georgia,serif';ctx.fillText('THE HORDE LEARNS '+c.trait.toUpperCase(),0,60);ctx.restore();
   }
   if(G.tutorial && G.mode==='run' && G.t<32){
-    const phase=G.t<9?0:G.t<21?1:2;
+    const phase=G.t<8?0:G.t<16?1:G.t<25?2:3;
     const lines=[
       ['MOVE THE SCRIBE','WASD moves. Aim with the mouse; your implement writes by itself.'],
       ['MAKE SPACE',activeSkillId()==='margin'?'Press Q to cut the margin and drive the crowd outward.':'This implement has no active inscription yet.'],
+      ['USE THE PAGE','Trees, roots, and presses block attacks. Lead one enemy group away from another.'],
       ['WRITE THE HORDE','At level-up, every gift also gives the enemy a trait—and opens its material.'],
     ][phase];
     const bw=Math.min(520,W-40),bx=W/2-bw/2,by=72;
@@ -2502,6 +2534,14 @@ function drawHud(){
     ctx.fillStyle=INK2;ctx.font='italic 11px Georgia,serif';ctx.fillText(lines[1],W/2,by+38);
   }
   ctx.restore();
+}
+function drawWaymarks(){
+  for(const L of G.landmarks)for(const M of L.marks||[]){
+    ctx.save();ctx.translate(M.x,M.y);ctx.rotate(M.a);ctx.fillStyle='rgba(48,36,20,.10)';ctx.beginPath();ctx.ellipse(2,13,16,5,0,0,TAU);ctx.fill();
+    ctx.fillStyle=INK3;ctx.beginPath();ctx.moveTo(-9,11);ctx.lineTo(-7,-15);ctx.lineTo(8,-11);ctx.lineTo(10,12);ctx.closePath();ctx.fill();
+    ctx.strokeStyle=PARCH3;ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(-3,-8);ctx.lineTo(4,-6);ctx.moveTo(-3,-2);ctx.lineTo(5,0);ctx.stroke();
+    ctx.fillStyle=[RUBRIC,BLUEIN,VERD][M.cut];ctx.beginPath();ctx.moveTo(11,0);ctx.lineTo(22,-5);ctx.lineTo(22,5);ctx.closePath();ctx.fill();ctx.restore();
+  }
 }
 function drawLandmarks(){
   for(const L of G.landmarks){
@@ -2627,6 +2667,9 @@ function drawCompare(){
   ctx.fillText(better ? '▲ likely an upgrade' : '▼ likely a downgrade', W/2, y-10);
   ctx.fillStyle = INK2; ctx.font='500 10px Georgia, serif';
   ctx.fillText('ignoring it shatters it for materials in '+c.t.toFixed(1)+'s', W/2, y+h1+18);
+  const before=computeDoctrines(SV.loadout),after=computeDoctrines(Object.assign({},SV.loadout,{[it.slot]:it}));
+  const changes=['grave','ember','oath'].filter(id=>before[id]!==after[id]).map(id=>DOCTRINES[id].name+' '+before[id]+'→'+after[id]);
+  if(changes.length){ctx.fillStyle=BLUEIN;ctx.font='700 10px Georgia,serif';ctx.fillText('DOCTRINE CHANGE  ·  '+changes.join('   '),W/2,y+h1+34);}
   ctx.restore();
 }
 
@@ -2712,6 +2755,7 @@ function drawPause(){
     ctx.fillText(D.name.toUpperCase()+' '+n+(n>=5?'  —  '+D.t5:n>=3?'  —  '+D.t3:'  —  need '+(3-n)+' more'), W/2, y);
     y+=22;
   }
+  if(uiButton(W/2-80,y+12,160,30,'OPTIONS  [O]',INK2,true)){G.returnMode='paused';G.mode='settings';}
   ctx.restore();
 }
 function drawEnd(won){
@@ -2726,6 +2770,8 @@ function drawEnd(won){
 
   ctx.font='600 13px Georgia, serif'; ctx.fillStyle = won?INK:PARCH;
   ctx.fillText('survived '+fmtTime(G.t)+'   ·   '+G.kills+' felled   ·   level '+G.player.level, W/2, H*0.40);
+  ctx.font='500 11px Georgia,serif';ctx.fillStyle=won?INK2:PARCH3;
+  ctx.fillText(G.landmarks.filter(L=>L.discovered).length+' of '+G.landmarks.length+' landmarks recorded  ·  '+implement().name+' carried',W/2,H*0.40+23);
 
   ctx.font='500 11px Georgia, serif'; ctx.fillStyle = won?INK2:PARCH3;
   ctx.fillText('THE PAGE YOU WROTE', W/2, H*0.47);
@@ -2804,6 +2850,7 @@ function drawMenu(){
     G.mode='town';
     if(!SV.townSeen){ SV.townSeen=true; persist(); G.townIntro=8; }
   }
+  if(uiButton(W/2-80,H*0.63+58,160,28,'OPTIONS  [O]',INK2,true)){G.returnMode='menu';G.mode='settings';}
 
   // the horde, walking the bottom rule
   if(ART_READY){
@@ -2911,7 +2958,7 @@ function townInteract(){
   const s=G.townNear; if(!s)return;
   if(s.id==='forge') G.mode='forge';
   if(s.id==='gate') startRun();
-  if(s.id==='archive') G.townIntro=8;
+  if(s.id==='archive'){G.archivePage=0;G.mode='archive';}
 }
 function townBuilding(x,y,w,h,title,mark){
   ctx.save(); ctx.translate(x,y);
@@ -2952,7 +2999,7 @@ function drawTown(){
   }
   ctx.restore();
   ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 22px Georgia,serif';ctx.fillText('THE SCRIPTORIUM',W/2,38);
-  ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('WASD to walk  ·  E to enter',W/2,57);
+  ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('WASD to walk  ·  E to enter  ·  O options',W/2,57);
   let mx=22;ctx.textAlign='left';
   for(const k of MAT_IDS){ctx.fillStyle=MATERIALS[k].col;ctx.font='700 12px Georgia,serif';ctx.fillText(SV.mats[k]+' '+MATERIALS[k].name,mx,H-24);mx+=112;}
   if(G.townIntro>0){
@@ -2978,6 +3025,31 @@ function uiButton(x,y,w,h,label,col,small){
   ctx.textBaseline='alphabetic';
   ctx.restore();
   return hov && mouse.clicked;
+}
+function applySettings(){canvas.style.filter=SV.settings.contrast?'contrast(1.18) saturate(.92)':'none';persist();}
+function drawSettings(){
+  ctx.save();ctx.fillStyle=PARCH;ctx.fillRect(0,0,W,H);if(PAPER){ctx.fillStyle=PAPER;ctx.fillRect(0,0,W,H);}
+  const bw=Math.min(580,W-40),bh=Math.min(470,H-50),x=(W-bw)/2,y=(H-bh)/2;
+  ctx.fillStyle=PARCH2;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle=INK;ctx.lineWidth=2.5;ctx.strokeRect(x,y,bw,bh);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1;ctx.strokeRect(x+8,y+8,bw-16,bh-16);
+  ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 28px Georgia,serif';ctx.fillText('READING CONDITIONS',W/2,y+52);
+  ctx.fillStyle=INK2;ctx.font='italic 12px Georgia,serif';ctx.fillText('change how the page moves and prints; progress is unaffected',W/2,y+75);
+  const rows=[['shake','PAGE IMPACT','camera movement when attacks land'],['particles','LOOSE INK','extra combat specks and embers'],['contrast','DARK IMPRESSION','stronger separation between ink and parchment'],['threatCues','THREAT CUES','faint rings distinguish ranged, support, brood, and guard enemies']];
+  let ry=y+110;
+  for(const [id,name,sub] of rows){ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 14px Georgia,serif';ctx.fillText(name,x+42,ry+18);ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(sub,x+42,ry+38);const on=SV.settings[id];if(uiButton(x+bw-148,ry,104,42,on?'ON':'OFF',on?VERD:INK2)){SV.settings[id]=!on;applySettings();}ry+=74;}
+  if(uiButton(W/2-95,y+bh-76,190,38,'REPLAY FIRST-RUN GUIDE',RUBRIC,true)){SV.tutorialDone=false;persist();}
+  ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Esc returns',W/2,y+bh-22);ctx.restore();
+}
+function drawArchive(){
+  ctx.save();ctx.fillStyle=PARCH;ctx.fillRect(0,0,W,H);if(PAPER){ctx.fillStyle=PAPER;ctx.fillRect(0,0,W,H);}
+  const i=clamp(G.archivePage,0,CARDS.length-1),c=CARDS[i],known=!!SV.seen[c.id],bw=Math.min(760,W-50),bh=Math.min(540,H-45),x=(W-bw)/2,y=(H-bh)/2;
+  ctx.fillStyle=PARCH2;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle=INK;ctx.lineWidth=3;ctx.strokeRect(x,y,bw,bh);ctx.strokeStyle=MATERIALS[c.mat].col;ctx.lineWidth=1.5;ctx.strokeRect(x+9,y+9,bw-18,bh-18);
+  ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText('THE BESTIARY  ·  PAGE '+(i+1)+' OF '+CARDS.length,W/2,y+38);
+  ctx.fillStyle=known?INK:'rgba(60,48,32,.42)';ctx.font='700 30px Georgia,serif';ctx.fillText(known?c.name:'AN UNWRITTEN PAGE',W/2,y+84);
+  ctx.strokeStyle=known?MATERIALS[c.mat].col:INK2;ctx.beginPath();ctx.moveTo(x+70,y+105);ctx.lineTo(x+bw-70,y+105);ctx.stroke();
+  if(known){const dk=MATERIALS[c.mat].kw;ctx.textAlign='left';ctx.fillStyle=VERD;ctx.font='700 12px Georgia,serif';ctx.fillText('THE GIFT',x+64,y+146);wrap(c.boon,x+64,y+174,bw-128,20,INK,'500 15px Georgia,serif');ctx.fillStyle=RUBRIC;ctx.font='700 12px Georgia,serif';ctx.fillText('WHAT IT WRITES INTO THE HORDE',x+64,y+246);wrap(c.curse,x+64,y+274,bw-128,20,RUBRIC,'italic 500 15px Georgia,serif');ctx.fillStyle=MATERIALS[c.mat].col;ctx.font='700 13px Georgia,serif';ctx.fillText('MATERIAL OPENED  ·  '+MATERIALS[c.mat].name.toUpperCase(),x+64,y+360);ctx.fillStyle=INK2;ctx.font='500 12px Georgia,serif';ctx.fillText('Use this material at the Ink-Forge to inscribe '+(dk?DOCTRINES[dk].name.toLowerCase():'unbound')+' gear.',x+64,y+387);}else{ctx.fillStyle=INK2;ctx.font='italic 15px Georgia,serif';ctx.fillText('Choose this page during a descent to preserve its law here.',W/2,y+220);ctx.strokeStyle='rgba(60,48,32,.25)';for(let n=0;n<7;n++){ctx.beginPath();ctx.moveTo(x+90,y+270+n*24);ctx.lineTo(x+bw-90,y+270+n*24);ctx.stroke();}}
+  if(uiButton(x+34,y+bh-62,100,32,'← PREVIOUS',INK2,true))G.archivePage=(i+CARDS.length-1)%CARDS.length;
+  if(uiButton(x+bw-134,y+bh-62,100,32,'NEXT →',INK2,true))G.archivePage=(i+1)%CARDS.length;
+  ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Arrow keys turn pages  ·  Esc returns to town',W/2,y+bh-34);ctx.restore();
 }
 const CRAFT_COST = r => ({0:6, 1:14, 2:30, 3:60})[r];
 
@@ -3177,6 +3249,7 @@ setInterval(()=>{
 
 resize();
 bakeArt();     // must follow resize(): the paper patterns are made from ctx
+applySettings();
 
 /* ============================================== headless test surface */
 window.step = step;
