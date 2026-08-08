@@ -145,11 +145,14 @@ were structural rather than numerical, and are worth knowing:
   ranged quills, Broodpods split into Rootlings, and Stumpguards act as durable
   moving walls. The first minute now mixes husks, creepers, bloats, and rootlings;
   specialist roles enter in later readable chapters.
+- Stumpguards shelter nearby lesser creatures, Bellowers accelerate their
+  neighbours, and Broodpods release runners. Threat rings and guard brackets
+  expose these relationships so formations have a readable target priority.
 - Material drops now name themselves in-world when collected from a kill.
-- One fixed active ability establishes the baseline without creating another
-  progression track: `Q` Margin Cut drives the surrounding crowd outward. It
-  is saved as the Greatsword's active inscription; Censer and Longbow currently
-  display an intentional "not yet discovered" state and have no active HUD.
+- Active abilities remain weapon inscriptions rather than a separate skill tree:
+  Greatsword starts with `Q` Margin Cut, the first Warden opens Longbow's
+  Redline Volley, and the second opens Censer's Black Bloom. The Forge previews
+  every seal and the town monument shows progress toward each one.
 - Trees, broken printer-rule walls, and local crowd separation
   now create lanes and funnels. Collision is deliberately soft to avoid jams.
 - The combat HUD now uses Doctrine seals, skill cooldown plates, an in-world
@@ -162,8 +165,10 @@ were structural rather than numerical, and are worth knowing:
   material, and Forge relationship. Ten creature entries record silhouettes,
   combat roles, and field statistics after each species, including the Warden,
   is encountered.
-- Persistent reading options cover impact shake, particle density, contrast,
-  and role-based threat cues. The first-run guide can be replayed there.
+- Persistent reading options cover procedural sound, impact shake, particle
+  density, contrast, and role-based threat cues. The first-run guide can be
+  replayed there. Audio is synthesized at runtime from paper noise, wooden
+  impacts, rubric tones, and Warden drones; there are no external samples.
 - Fallen timber, exposed roots, and destructible letterpress type replace the
   old geometric wall placeholders. Trail marks lead toward major clearings.
 - Cover now defines implement and enemy roles: quills and Longbow shots stop on
@@ -173,9 +178,11 @@ were structural rather than numerical, and are worth knowing:
   and the Hanging Folio opens a timed direction-and-distance field index.
 - Page selection now resolves with a short transformation stamp showing the
   horde trait and its material colour. Player damage has an edge impression.
+- The Warden now enters under a full-width chapter plate, receives a second
+  impression at half Vellum, and has distinct arrival, phase, and ending cues.
 - Newer creature families have baked silhouette additions rather than relying
   only on runtime colour marks.
-- Zone 2 and audio remain deliberately out of scope.
+- Zone 2 remains deliberately out of scope.
 
 ## Suggested next work, roughly in order
 
@@ -188,6 +195,6 @@ were structural rather than numerical, and are worth knowing:
 4. **A fourth implement**, and a second Doctrine tier at 7 keywords.
 5. Mobile / touch controls. Currently keyboard + mouse only.
 
-Things deliberately **not** built: Zone 2, audio, run modifiers,
+Things deliberately **not** built: Zone 2, run modifiers,
 meta skill tree (rejected — it would be a third progression system), or external
 art assets (everything is drawn in code, and should stay that way).
