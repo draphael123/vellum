@@ -46,10 +46,10 @@ const VERD   = '#5d6b3a';   // orchard green, muted like aged pigment
 const BLUEIN = '#3d4a63';
 
 /* ---------------------------------------------------------------- tuning */
-const ZONE_TIME   = 480;    // seconds until the Orchard-Warden arrives (v0: 8 min)
+const ZONE_TIME   = 90;     // the Warden enters at 1:30; a full impression targets two minutes
 const WORLD       = 2600;   // half-extent of the field
 const MAX_ENEMIES = 420;
-const GAME_VERSION = '0.12.0';
+const GAME_VERSION = '0.13.0';
 
 /* extra tones for the print: ink is never one flat black in a real impression */
 const INK3   = '#2b241b';
@@ -797,6 +797,7 @@ const CARDS = [
 const SAVE_KEY = 'vellum_save_v1';
 const PREFERS_REDUCED_MOTION=!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 const BINDINGS=[
+  {id:'story',name:'THE QUIET READING',mark:'0',col:BLUEIN,desc:'A gentler two-minute impression for learning the page.',law:'-28% formation pressure  ·  slower contact',spawn:.72,speed:.88,reward:.8},
   {id:'unbound',name:'THE OPEN FOLIO',mark:'I',col:INK,desc:'The Orchard is read at its intended pressure.',law:'standard formations and rewards',spawn:1,speed:1,reward:1},
   {id:'thicket',name:'THE CROWDED MARGIN',mark:'II',col:VERD,desc:'Enemy groups arrive more often and closer together.',law:'+22% formation pressure  ·  +35% materials',spawn:1.22,speed:1,reward:1.35},
   {id:'redhand',name:'THE RED HAND',mark:'III',col:RUBRIC,desc:'Every body keeps a quicker pace; gilded threats are common.',law:'+12% enemy pace  ·  +60% materials',spawn:1.08,speed:1.12,reward:1.6,elite:.055},
@@ -812,7 +813,7 @@ function blankSave(){
     mastery:{greatsword:0,longbow:0,censer:0},inscriptions:{greatsword:'margin',longbow:'redline',censer:'bloom'},lastBinding:'unbound',runHistory:[],
     seen:{},          // bestiary pages ever inscribed
     seenEnemies:{},
-    settings:{sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true},
+    settings:{sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true,hitFlash:true},
   };
 }
 function loadSave(){
@@ -831,7 +832,7 @@ function loadSave(){
     if(!Array.isArray(s.runHistory))s.runHistory=[];
     if(!BINDINGS.some(b=>b.id===s.lastBinding))s.lastBinding='unbound';
     if(typeof s.tutorialDone!=='boolean') s.tutorialDone=false;
-    s.settings=Object.assign({sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true},s.settings||{});
+    s.settings=Object.assign({sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true,hitFlash:true},s.settings||{});
     // keep uid counter ahead of anything loaded
     const all = s.stash.concat(SLOTS.map(x=>s.loadout[x]).filter(Boolean));
     for(const it of all){
@@ -900,7 +901,7 @@ const G = {
   archiveCopied:false,
   abandonConfirm:false,
   binding:'unbound',outcome:'abandoned',practice:false,
-  wanderer:null,wandererSpawned:false,redProcession:false,
+  wanderer:null,wandererSpawned:false,redProcession:false,bailiffSpawned:false,
   weather:'still',wardenWeaken:null,skillPose:null,eliteIntro:null,ceremony:null,lowPulse:0,
   combo:{last:null,count:0,t:0},
   announced:{},
@@ -1190,7 +1191,7 @@ function startRun(practice=false){
   G.wardenWeaken=null;G.skillPose=null;G.eliteIntro=null;G.ceremony=null;G.lowPulse=0;
   G.combo={last:null,count:0,t:0};
   G.announced={};
-  G.wanderer=null;G.wandererSpawned=false;G.redProcession=false;
+  G.wanderer=null;G.wandererSpawned=false;G.redProcession=false;G.bailiffSpawned=false;
   G.player = makePlayer();
   G.cam.x=0; G.cam.y=0; G.shake=0;G.hitStop=0;
   buildOrchard();
@@ -1208,7 +1209,7 @@ function endRun(){
   for(const k of MAT_IDS) SV.mats[k] += Math.round((G.runMats[k]||0)*reward);
   for(const it of G.runLoot) SV.stash.push(it);
   if(G.t > SV.best) SV.best = G.t;
-  const weapon=SV.loadout.implement?.base||'greatsword',masteryGain=Math.max(1,Math.floor(G.t/150))+(G.outcome==='victory'?2:0);
+  const weapon=SV.loadout.implement?.base||'greatsword',masteryGain=1+(G.outcome==='victory'?2:0)+(G.bailiffSpawned?1:0);
   SV.mastery[weapon]=(SV.mastery[weapon]||0)+masteryGain;
   SV.runHistory.unshift({at:Date.now(),outcome:G.outcome,time:Math.round(G.t),kills:G.kills,level:G.player?.level||1,weapon,binding:G.binding,cards:G.cards.map(c=>c.id),cause:G.deathCause||null});
   SV.runHistory=SV.runHistory.slice(0,10);
@@ -1244,12 +1245,12 @@ const ENEMY_LORE={
   inkspitter:['THE INKSPITTER','ranged pressure','Draws a red line before firing, then sidesteps when timber blocks its quill.'],
   broodpod:['THE BROODPOD','splitting threat','A slow pod that opens into a knot of Rootlings when destroyed.'],
   stumpguard:['THE STUMPGUARD','armoured anchor','Blunts small hits and shelters nearby bodies. Break the guard before the crowd.'],
-  warden:['THE ORCHARD-WARDEN','final authority','Walks after eight minutes, changes pace at half Vellum, and answers with five attack forms.'],
+  warden:['THE ORCHARD-WARDEN','final authority','Closes the two-minute impression, changes pace at half Vellum, and answers with five attack forms.'],
 };
 function spawnRate(){
   const m = G.t/60;
   if(G.t<2.5)return 0;
-  let r = 1.6 + m*1.55 + Math.pow(m,1.7)*0.30;
+  let r = 1.75 + m*2.2 + Math.pow(m,1.55)*0.42;
   if(G.traits.swarm) r *= 1.33;
   if(G.weather==='harvest')r*=1.1;
   return r*binding().spawn;
@@ -1257,14 +1258,14 @@ function spawnRate(){
 function pickKind(){
   const m = G.t/60;
   const pool=[['husk',0.62]];
-  if(m>0.18)pool.push(['creeper',0.30]);
-  if(m>0.55)pool.push(['bloat',0.14]);
-  if(m>0.75)pool.push(['rootling',G.traits.roots?0.25:0.16]);
-  if(m>2.0)pool.push(['broodpod',0.09]);
-  if(m>2.6)pool.push(['needlekin',G.traits.needles?0.20:0.12]);
-  if(m>3.4)pool.push(['inkspitter',0.08]);
-  if(m>4.5)pool.push(['bellower',G.traits.choir?0.14:0.08]);
-  if(m>5.8)pool.push(['stumpguard',0.05]);
+  if(m>.10)pool.push(['creeper',0.28]);
+  if(m>.24)pool.push(['bloat',0.13]);
+  if(m>.34)pool.push(['rootling',G.traits.roots?0.24:0.15]);
+  if(m>.48)pool.push(['needlekin',G.traits.needles?0.19:0.11]);
+  if(m>.62)pool.push(['inkspitter',0.075]);
+  if(m>.78)pool.push(['broodpod',0.075]);
+  if(m>.95)pool.push(['bellower',G.traits.choir?0.13:0.075]);
+  if(m>1.12)pool.push(['stumpguard',0.055]);
   let roll=Math.random()*pool.reduce((n,q)=>n+q[1],0);
   for(const [kind,w] of pool){roll-=w;if(roll<=0)return kind;}
   return 'husk';
@@ -1274,7 +1275,7 @@ function spawnEnemy(kind, x, y){
   const K = ENEMY_KINDS[kind];
   const m = G.t/60;
   const natural=x===undefined;
-  const hpScale = 1 + m*0.30 + Math.pow(m,1.55)*0.08;
+  const hpScale = 1 + m*0.18 + Math.pow(m,1.4)*0.05;
   if(x === undefined){
     const a = rand(TAU);
     const d = Math.max(W,H)*0.62 + rand(140);
@@ -1306,12 +1307,20 @@ function spawnRing(n, radius){
   }
 }
 
+function spawnBailiff(){
+  const p=G.player,a=rand(TAU),d=Math.max(W,H)*.48,cx=p.x+Math.cos(a)*d,cy=p.y+Math.sin(a)*d;
+  const e=spawnEnemy('stumpguard',cx,cy);if(!e)return;
+  e.bailiff=true;e.elite=true;e.hp=720;e.maxhp=720;e.r*=1.28;e.dmg*=1.3;e.spd=58;e.xp=14;e.breakMax=120;e.break=120;
+  for(let i=-2;i<=2;i++){const q=a+Math.PI/2,guard=spawnEnemy(i%2?'needlekin':'husk',cx+Math.cos(q)*i*38,cy+Math.sin(q)*i*38);if(guard)guard.bailiffGuard=true;}
+  G.eliteIntro={name:'THE ORCHARD BAILIFF',t:1.5};say('THE ORCHARD BAILIFF','break its authority; use the page against its escort');sfx('elite');G.shake=10;
+}
+
 /* ================================================================= BOSS */
 function spawnBoss(){
   const a = rand(TAU), d = Math.max(W,H)*0.55;
   G.boss = {
     x:G.player.x+Math.cos(a)*d, y:G.player.y+Math.sin(a)*d,
-    r:56, hp:5200, maxhp:5200, spd:52, phase:1,
+    r:56, hp:2100, maxhp:2100, spd:54, phase:1,
     state:'chase', st:0, tell:null, atkCd:3.2, hitT:0, slow:0, burn:0,
     transition:0,
   };
@@ -1460,6 +1469,12 @@ function damageEnemy(e, amount, knock, srcA){
 function killEnemy(e){
   if(e.dead) return;
   e.dead = true;
+  if(e.bailiff){
+    G.runMats.gilt=(G.runMats.gilt||0)+5;G.player.hp=Math.min(G.player.maxhp,G.player.hp+24);
+    for(const id of Object.keys(G.skills))G.skills[id]=0;
+    floater('AUTHORITY REVOKED  +5 GILT',e.x,e.y-48,GOLD);say('THE BAILIFF IS REVISED','the final clause approaches; Vellum and inscription restored');
+    G.ceremony={kind:'bailiff',t:1.2,dur:1.2};G.hitStop=Math.max(G.hitStop,.11);sfx('phase');
+  }
   if(e.lastEnv){combatChain('environment');G.runMats.heartwood=(G.runMats.heartwood||0)+2;floater(e.lastEnv+' EXECUTION  +2',e.x,e.y-38,GOLD);G.hitStop=Math.max(G.hitStop,.07);sfx('platen',1.2);}
   G.kills++; G.killsSinceHeal++;
   if(e.elite||e.kind==='stumpguard'||G.kills%7===0)sfx('kill',e.elite?1.4:1);
@@ -1711,7 +1726,7 @@ function step(dt){
   // before its final lesson. It becomes optional only after all four stages.
   if(G.tutorial&&!SV.tutorialDone&&G.t>=32){SV.tutorialDone=true;persist();}
 
-  if(!G.practice&&!G.wandererSpawned&&G.t>=135){const a=rand(TAU);G.wandererSpawned=true;G.wanderer={x:G.player.x+Math.cos(a)*230,y:G.player.y+Math.sin(a)*230,t:55,traded:false};say('A WAYFARING SCRIBE','find the blue seal; two materials can mend the page');}
+  if(!G.practice&&!G.wandererSpawned&&G.t>=68&&Math.random()<dt*.18){const a=rand(TAU);G.wandererSpawned=true;G.wanderer={x:G.player.x+Math.cos(a)*230,y:G.player.y+Math.sin(a)*230,t:32,traded:false};say('A WAYFARING SCRIBE','find the blue seal; two materials can mend the page');}
   if(G.wanderer){G.wanderer.t-=dt;if(G.wanderer.t<=0)G.wanderer=null;}
 
   const p = G.player;
@@ -1756,14 +1771,18 @@ function step(dt){
   for(const id of Object.keys(SKILLS)) G.skills[id]=Math.max(0,G.skills[id]-dt);
 
   /* --- spawning --- */
+  if(!G.practice&&!G.boss&&!G.bailiffSpawned&&G.t>=45){G.bailiffSpawned=true;spawnBailiff();}
   if(!G.practice&&!G.boss && G.t < ZONE_TIME){
     G.spawnAcc += spawnRate()*dt;
     while(G.spawnAcc >= 1){ G.spawnAcc -= 1; spawnEnemy(pickKind()); }
-    // pressure waves every 45s
-    const w = Math.floor(G.t/45);
+    // Two authored pressure turns frame the midpoint authority.
+    const w = Math.floor(G.t/30);
     if(w > G.wave){ G.wave = w; spawnFormation(w, Math.max(W,H)*0.55); }
   }
-  if(!G.practice&&!G.boss && G.t >= ZONE_TIME && G.mode==='run' && !G.bossWarned){ G.bossWarned=true; spawnBoss(); }
+  if(!G.practice&&!G.boss && G.t >= ZONE_TIME && G.mode==='run' && !G.bossWarned){
+    const bailiff=G.enemies.find(e=>e.bailiff&&!e.dead);if(bailiff){floater('OUTRANKED',bailiff.x,bailiff.y-42,RUBRIC);killEnemy(bailiff);}
+    G.bossWarned=true; spawnBoss();
+  }
   if(G.boss) updateBoss(dt);
 
   updateSwings(dt);
@@ -2449,6 +2468,7 @@ function drawEnemies(){
       ctx.beginPath();ctx.arc(e.x,e.y,e.r+8,0,TAU);ctx.stroke();ctx.setLineDash([]);
       ctx.fillStyle='rgba(28,23,18,0.28)';ctx.fillRect(e.x-18,e.y-e.r-17,36,4);ctx.fillStyle=GOLD;ctx.fillRect(e.x-18,e.y-e.r-17,36*clamp(e.hp/e.maxhp,0,1),4);ctx.restore();
     }
+    if(e.bailiff){ctx.save();ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 9px Georgia,serif';ctx.fillText('THE ORCHARD BAILIFF',e.x,e.y-e.r-31);ctx.fillStyle=GOLD;ctx.fillRect(e.x-32,e.y-e.r-25,64*clamp(e.hp/e.maxhp,0,1),3);ctx.restore();}
     // bark: a second heavier outline, so armoured ones read at a glance
     if(e.bark){
       ctx.save(); ctx.globalAlpha = 0.5; ctx.strokeStyle = VERD; ctx.lineWidth = 2;
@@ -2783,11 +2803,11 @@ function drawVignette(){
   const g2 = ctx.createRadialGradient(W*0.45,H*0.38,0, W*0.45,H*0.38,Math.max(W,H)*0.5);
   g2.addColorStop(0,'rgba(255,246,220,0.16)'); g2.addColorStop(1,'rgba(255,246,220,0)');
   ctx.fillStyle=g2; ctx.fillRect(0,0,W,H);
-  if(G.player&&G.player.hurtT>0){
+  if(SV.settings.hitFlash&&G.player&&G.player.hurtT>0){
     const a=clamp(G.player.hurtT/0.42,0,1)*0.34;ctx.save();ctx.strokeStyle=`rgba(164,36,59,${a})`;ctx.lineWidth=18;
     ctx.strokeRect(3,3,W-6,H-6);ctx.restore();
   }
-  if(G.player&&G.player.hp/G.player.maxhp<.25){const pulse=.12+.10*Math.sin(G.t*5);ctx.save();ctx.strokeStyle=`rgba(164,36,59,${pulse})`;ctx.lineWidth=32;ctx.strokeRect(4,4,W-8,H-8);ctx.restore();}
+  if(SV.settings.hitFlash&&G.player&&G.player.hp/G.player.maxhp<.25){const pulse=.12+.10*Math.sin(G.t*5);ctx.save();ctx.strokeStyle=`rgba(164,36,59,${pulse})`;ctx.lineWidth=32;ctx.strokeRect(4,4,W-8,H-8);ctx.restore();}
   if(G.mode==='run'&&(G.weather==='rain'||G.weather==='ash')){ctx.save();ctx.globalAlpha=G.weather==='rain' ? .12 : .09;ctx.strokeStyle=G.weather==='rain'?BLUEIN:INK2;ctx.fillStyle=INK2;for(let i=0;i<34;i++){const x=(i*83+G.t*(G.weather==='rain'?75:18))%(W+80)-40,y=(i*47+G.t*(G.weather==='rain'?150:22))%(H+80)-40;if(G.weather==='rain'){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-8,y+20);ctx.stroke();}else{ctx.beginPath();ctx.arc(x,y,1.5+(i%3),0,TAU);ctx.fill();}}ctx.restore();}
 }
 /* Laid over everything, including the UI, so the whole frame reads as one
@@ -2839,7 +2859,7 @@ function drawHud(){
   const left = Math.max(0, ZONE_TIME - G.t);
   ctx.fillText(G.practice?'PROOF':G.boss ? fmtTime(G.t) : fmtTime(left), W/2, 38);
   ctx.font='500 10px Georgia, serif'; ctx.fillStyle=INK2;
-  ctx.fillText(G.practice?'NO LOOT  ·  NO HARM':G.boss ? 'THE WARDEN WALKS' : 'UNTIL THE WARDEN', W/2, 52);
+  ctx.fillText(G.practice?'NO LOOT  ·  NO HARM':G.boss ? 'FINISH THE FINAL CLAUSE' : G.t<45?'UNTIL THE BAILIFF':'UNTIL THE WARDEN', W/2, 52);
 
   // kills + materials
   ctx.textAlign='right'; ctx.font='600 12px Georgia, serif'; ctx.fillStyle=INK;
@@ -2932,13 +2952,13 @@ function drawHud(){
     ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 11px Georgia,serif';ctx.fillText(G.bossChapter,W/2,H*.41+30);ctx.font='700 31px Georgia,serif';ctx.fillText('THE ORCHARD-WARDEN',W/2,H*.41+65);ctx.fillStyle=RUBRIC;ctx.font='italic 12px Georgia,serif';ctx.fillText('the page has appointed its final authority',W/2,H*.41+87);ctx.restore();
   }
   if(G.eliteIntro){const k=clamp(G.eliteIntro.t/1.5,0,1);ctx.save();ctx.globalAlpha=Math.min(1,k*2);ctx.fillStyle='rgba(230,217,184,.91)';ctx.fillRect(W/2-225,H*.19-25,450,62);ctx.strokeStyle=GOLD;ctx.lineWidth=2;ctx.strokeRect(W/2-219,H*.19-19,438,50);ctx.textAlign='center';ctx.fillStyle=RUBRIC;ctx.font='700 10px Georgia,serif';ctx.fillText('GILDED AUTHORITY',W/2,H*.19);ctx.fillStyle=INK;ctx.font='700 21px Georgia,serif';ctx.fillText(G.eliteIntro.name,W/2,H*.19+24);ctx.restore();}
-  if(G.tutorial && G.mode==='run' && G.t<32){
+  if((G.tutorial||G.practice) && G.mode==='run' && G.t<32){
     const phase=G.t<8?0:G.t<16?1:G.t<25?2:3;
     const lines=[
       ['MOVE THE SCRIBE','WASD moves. Aim with the mouse; your implement writes by itself.'],
       ['MAKE SPACE',activeSkillId()?'SPACE ink-steps through danger. Q casts '+SKILLS[activeSkillId()].name+'.':'SPACE ink-steps through danger; the inscription is still sealed.'],
-      ['USE THE PAGE','Crack marked trees, bait the red press, and turn pursuers through root snares.'],
-      ['WRITE THE HORDE','At level-up, every gift also gives the enemy a trait—and opens its material.'],
+      ['BREAK AUTHORITY','Heavy hits empty the gold margin. Broken enemies take more damage.'],
+      ['USE THE PAGE',G.practice?'Try SPACE, Q, and E beside a broken proof. Leave with Esc.':'Use trees, the red press, and root snares to divide the horde.'],
     ][phase];
     const bw=Math.min(520,W-40),bx=W/2-bw/2,by=72;
     ctx.fillStyle='rgba(230,217,184,0.91)';ctx.fillRect(bx,by,bw,52);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,52);
@@ -3353,7 +3373,7 @@ function drawBindings(){
   ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 31px Georgia,serif';ctx.fillText('BIND THE DESCENT',W/2,76);
   ctx.fillStyle=RUBRIC;ctx.font='italic 13px Georgia,serif';ctx.fillText('choose what pressure the next impression must bear',W/2,101);
   ctx.strokeStyle=INK2;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(W/2-250,119);ctx.lineTo(W/2+250,119);ctx.stroke();
-  const compact=W<780,cw=compact?Math.min(560,W-36):Math.min(260,(W-90)/3),ch=compact?118:330,gap=compact?12:22;
+  const compact=W<920,cw=compact?Math.min(560,W-36):Math.min(230,(W-110)/4),ch=compact?108:330,gap=compact?10:18;
   const total=compact?(ch+gap)*BINDINGS.length-gap:(cw+gap)*BINDINGS.length-gap;
   for(let i=0;i<BINDINGS.length;i++){
     const B=BINDINGS[i],x=compact?(W-cw)/2:W/2-total/2+i*(cw+gap),y=compact?140+i*(ch+gap):160;
@@ -3365,7 +3385,6 @@ function drawBindings(){
     else{wrap(B.desc,x+26,y+150,cw-52,18,INK2,'500 13px Georgia,serif');const laws=B.law.split('  ·  ');ctx.fillStyle=B.col;ctx.font='700 9px Georgia,serif';ctx.fillText(laws[0].toUpperCase(),x+cw/2,y+242);if(laws[1])ctx.fillText(laws[1].toUpperCase(),x+cw/2,y+258);ctx.fillStyle=INK2;ctx.font='italic 10px Georgia,serif';ctx.fillText('MATERIAL IMPRESSION  ×'+B.reward.toFixed(2),x+cw/2,y+288);}
     if(hov&&mouse.clicked){G.binding=B.id;SV.lastBinding=B.id;persist();startRun();}
   }
-  if(!G.practice&&!G.redProcession&&G.t>=255){G.redProcession=true;const p=G.player,a=rand(TAU),cx=p.x+Math.cos(a)*Math.max(W,H)*.5,cy=p.y+Math.sin(a)*Math.max(W,H)*.5;for(let i=0;i<7;i++){const q=(i-3)*34,e=spawnEnemy(i%3===0?'bellower':i%2?'stumpguard':'needlekin',cx+Math.cos(a+Math.PI/2)*q,cy+Math.sin(a+Math.PI/2)*q);if(e){e.elite=true;e.hp*=1.65;e.maxhp=e.hp;e.dmg*=1.2;e.xp*=2;}}G.eliteIntro={name:'THE RUBRIC PROCESSION',t:1.5};say('THE RUBRIC PROCESSION','gilded authorities carry a richer impression');sfx('elite');}
   if(uiButton(W/2-80,H-64,160,32,'RETURN TO TOWN',INK2,true)){G.mode='town';G.turnT=.46;}
   ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 10px Georgia,serif';ctx.fillText('Esc returns  ·  bindings alter pressure and material yield, never permanent stats',W/2,H-20);ctx.restore();
 }
@@ -3374,7 +3393,7 @@ const TOWN_SITES = [
   {id:'archive',x:0,y:-170,r:70,name:'THE BESTIARY',sub:'read the law of the page'},
   {id:'seal',x:0,y:35,r:48,name:'THE WARDEN SEAL',sub:'read the inscriptions opened by victory'},
   {id:'practice',x:150,y:170,r:44,name:'THE PROOFING YARD',sub:'test the equipped weapon and inscription'},
-  {id:'gate',x:265,y:4,r:82,name:'THE ORCHARD GATE',sub:'begin the next descent'},
+  {id:'gate',x:265,y:4,r:82,name:'THE ORCHARD GATE',sub:'begin a two-minute impression'},
 ];
 function updateTown(dt){
   const p=G.townPlayer; let x=0,y=0;
@@ -3597,15 +3616,15 @@ function uiButton(x,y,w,h,label,col,small){
 function applySettings(){canvas.style.filter=SV.settings.contrast?'contrast(1.18) saturate(.92)':'none';persist();}
 function drawSettings(){
   ctx.save();ctx.fillStyle=PARCH;ctx.fillRect(0,0,W,H);if(PAPER){ctx.fillStyle=PAPER;ctx.fillRect(0,0,W,H);}
-  const bw=Math.min(580,W-40),bh=Math.min(540,H-40),x=(W-bw)/2,y=(H-bh)/2;
+  const bw=Math.min(580,W-40),bh=Math.min(640,H-20),x=(W-bw)/2,y=(H-bh)/2;
   const compact=bw<480;
   ctx.fillStyle=PARCH2;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle=INK;ctx.lineWidth=2.5;ctx.strokeRect(x,y,bw,bh);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1;ctx.strokeRect(x+8,y+8,bw-16,bh-16);
   if(uiButton(x+bw-86,y+16,62,26,'RETURN',INK2,true)){G.mode=G.returnMode||'menu';G.turnT=.42;}
   ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 '+(compact?21:28)+'px Georgia,serif';ctx.fillText('READING CONDITIONS',W/2,y+52);
   ctx.fillStyle=INK2;ctx.font='italic 12px Georgia,serif';ctx.fillText('change how the page moves and prints; progress is unaffected',W/2,y+75);
-  const rows=[['sound','SOUND IMPRESSION','paper, timber, weapon, horde, and Warden cues'],['shake','PAGE MOTION','camera impact and page-turn movement'],['particles','LOOSE INK','extra combat specks and embers'],['contrast','DARK IMPRESSION','stronger separation between ink and parchment'],['threatCues','THREAT CUES','rings distinguish ranged, support, brood, and guard enemies']];
+  const rows=[['sound','SOUND IMPRESSION','paper, timber, weapon, horde, and Warden cues'],['shake','PAGE MOTION','camera impact and page-turn movement'],['particles','LOOSE INK','extra combat specks and embers'],['contrast','DARK IMPRESSION','stronger separation between ink and parchment'],['threatCues','THREAT CUES','rings distinguish ranged, support, brood, and guard enemies'],['hitFlash','DAMAGE FLASH','red page-edge feedback at low Vellum and on impact']];
   let ry=y+96;
-  for(const [id,name,sub] of rows){ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 '+(compact?11:14)+'px Georgia,serif';ctx.fillText(name,x+(compact?22:42),ry+18);if(!compact){ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(sub,x+42,ry+36);}const on=SV.settings[id];if(uiButton(x+bw-(compact?88:148),ry,compact?66:104,40,on?'ON':'OFF',on?VERD:INK2)){SV.settings[id]=!on;if(id==='sound'&&on&&master)master.gain.value=0;else if(id==='sound'){if(master)master.gain.value=.28;audioReady();}applySettings();}ry+=64;}
+  for(const [id,name,sub] of rows){ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 '+(compact?11:14)+'px Georgia,serif';ctx.fillText(name,x+(compact?22:42),ry+18);if(!compact){ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(sub,x+42,ry+34);}const on=SV.settings[id];if(uiButton(x+bw-(compact?88:148),ry,compact?66:104,38,on?'ON':'OFF',on?VERD:INK2)){SV.settings[id]=!on;if(id==='sound'&&on&&master)master.gain.value=0;else if(id==='sound'){if(master)master.gain.value=.28;audioReady();}applySettings();}ry+=compact?48:56;}
   const guideLabel=SV.tutorialDone?'REPLAY FIRST-RUN GUIDE':'FIRST-RUN GUIDE IS READY';
   const guideW=Math.min(210,bw-44);if(uiButton(W/2-guideW/2,y+bh-76,guideW,38,guideLabel,RUBRIC,true)){SV.tutorialDone=false;persist();}
   ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Esc returns',W/2,y+bh-22);ctx.restore();
@@ -3628,7 +3647,7 @@ function drawArchive(){
     ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='italic 10px Georgia,serif';ctx.fillText('Stored only in this browser. Copy it when sending balance feedback.',W/2,y+bh-100);
     if(uiButton(W/2-120,y+bh-82,240,34,G.archiveCopied?'REPORT COPIED':'COPY PLAYTEST REPORT',BLUEIN,true)){navigator.clipboard?.writeText(JSON.stringify(playtestReport(),null,2)).then(()=>G.archiveCopied=true).catch(()=>{});}
   }else if(creatures){
-    const kind=ENEMY_ORDER[i],bossEntry=kind==='warden',K=bossEntry?{hp:5200,spd:52,dmg:'five forms',xp:'—',col:RUBRIC}:ENEMY_KINDS[kind],lore=ENEMY_LORE[kind],known=!!SV.seenEnemies[kind];
+    const kind=ENEMY_ORDER[i],bossEntry=kind==='warden',K=bossEntry?{hp:2100,spd:54,dmg:'five forms',xp:'—',col:RUBRIC}:ENEMY_KINDS[kind],lore=ENEMY_LORE[kind],known=!!SV.seenEnemies[kind];
     ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText('CREATURE LEDGER  ·  ENTRY '+(i+1)+' OF '+ENEMY_ORDER.length,W/2,y+38);
     ctx.fillStyle=known?INK:'rgba(60,48,32,.42)';ctx.font='700 30px Georgia,serif';ctx.fillText(known?lore[0]:'AN UNSEEN CREATURE',W/2,y+82);
     ctx.strokeStyle=known?K.col:INK2;ctx.beginPath();ctx.moveTo(x+70,y+103);ctx.lineTo(x+bw-70,y+103);ctx.stroke();
@@ -3636,7 +3655,7 @@ function drawArchive(){
       const img=bossEntry?SPR.warden:SPR[kind][0],scale=bossEntry?Math.min(1.15,155/(img.height/SS)):Math.min(2.25,150/(img.height/SS));blit(img,W/2,y+270,scale,false);
       ctx.fillStyle=K.col;ctx.font='700 12px Georgia,serif';ctx.fillText(lore[1].toUpperCase(),W/2,y+305);
       wrap(lore[2],x+90,y+342,bw-180,19,INK,'500 14px Georgia,serif');
-      ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText(bossEntry?'VELLUM 5200  ·  PACE 52→70  ·  TWO PHASES  ·  FIVE ATTACK FORMS':'VELLUM '+K.hp+'  ·  PACE '+K.spd+'  ·  CONTACT '+K.dmg+'  ·  INK '+K.xp,W/2,y+410);
+      ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText(bossEntry?'VELLUM 2100  ·  PACE 54→73  ·  TWO PHASES  ·  FIVE ATTACK FORMS':'VELLUM '+K.hp+'  ·  PACE '+K.spd+'  ·  CONTACT '+K.dmg+'  ·  INK '+K.xp,W/2,y+410);
     }else{ctx.fillStyle=INK2;ctx.font='italic 15px Georgia,serif';ctx.fillText('Meet this creature in the Orchard to cut its form into the ledger.',W/2,y+250);}
   }else{
     const c=CARDS[i],known=!!SV.seen[c.id];

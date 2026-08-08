@@ -8,7 +8,7 @@ VELLUM is a hand-drawn browser action game set inside a living manuscript. Every
 
 ## What is in the current build
 
-- One complete eight-minute combat zone with six visual districts, six interactive landmarks, authored formations, rare elites, a wandering Scribe, the Rubric Procession encounter, and a two-phase boss with five attack forms.
+- One complete two-minute combat zone with six visual districts, interactive landmarks, authored formations, rare elites, a midpoint Orchard Bailiff, a wandering Scribe, and a two-phase boss with five attack forms.
 - Nine regular enemy families with distinct roles: pursuit, ranged pressure, support calls, splitting broods, lunges, and protective formations.
 - Twelve manuscript pages. Each page grants a gift, writes a curse into the horde, and opens a material line for the Forge.
 - Three implements with different relationships to cover: Greatsword cleaves, Longbow pierces, and Censer lobs over obstacles.
@@ -20,6 +20,7 @@ VELLUM is a hand-drawn browser action game set inside a living manuscript. Every
 - Authored animation and audio beats for inscriptions, elites, low health, forging, the Warden's second impression, and victory.
 - A two-charge Ink-Step with perfect-dodge rewards, enemy break states, rubric executions, crowd collisions, weapon-specific movement, clearer attack tells, Censer reactions, pinned quills, combat composition bonuses, and adaptive musical intensity.
 - A presentation pass with district printer seals, drifting marginalia, off-page threat quills, grouped manuscript HUD slips, and an animated, inhabited Scriptorium.
+- Four difficulty bindings including a gentler Quiet Reading, accelerated field mastery, a guided Proofing Yard, automatic focus-loss pause, and optional damage flashes.
 - Versioned feedback links and an exportable, browser-local playtest report for balance feedback without analytics or accounts.
 
 ## Controls

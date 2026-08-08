@@ -44,7 +44,7 @@ Three rules that follow from it, and should be held:
 
 | Section | What's in it |
 |---|---|
-| palette / tuning | `ZONE_TIME` (480s to the Warden), `WORLD`, `MAX_ENEMIES` |
+| palette / tuning | `ZONE_TIME` (90s to the Warden; roughly 120s total), `WORLD`, `MAX_ENEMIES` |
 | **ART ENGINE** | `mulberry32`, `roughShape`, `hatch`, `limb`, `bakePaper`, `bake*` |
 | GEAR SYSTEM | `IMPLEMENTS`, `AFFIXES`, `RARITY`, `MATERIALS`, `makeItem` |
 | doctrines | `DOCTRINES`, `computeDoctrines` |
