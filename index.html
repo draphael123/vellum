@@ -869,6 +869,8 @@ const G = {
   region:'THE RULED GROVE', regionT:0,
   folioT:0,
   inscribeFlash:null,
+  turnT:0,
+  turnSound:false,
   returnMode:'menu', archivePage:0,archiveTab:'pages',
   announced:{},
 };
@@ -916,6 +918,7 @@ function sfx(id,power=1){
   else if(id==='victory'){[262,330,392,523].forEach((f,i)=>tone(f,.42,'triangle',.07,1,i*.13));}
   else if(id==='dead'){[147,117,87].forEach((f,i)=>tone(f,.36,'triangle',.07,.72,i*.14));}
   else if(id==='ui'){tone(410,.045,'triangle',.025,1.08);}
+  else if(id==='turn'){noise(.18,.07,1500);tone(118,.12,'triangle',.025,.78,.05);}
 }
 function audioAmbience(dt){
   if(!AC||!SV.settings.sound||G.mode!=='run')return;ambienceClock-=dt;if(ambienceClock>0)return;
@@ -930,9 +933,9 @@ addEventListener('keydown', e=>{
   audioReady();
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   keys[e.key.toLowerCase()] = true;
-  if(G.mode==='menu'&&e.key==='Enter'){G.mode='town';if(!SV.townSeen){SV.townSeen=true;persist();G.townIntro=8;}}
+  if(G.mode==='menu'&&e.key==='Enter'){G.mode='town';G.turnT=.62;if(!SV.townSeen){SV.townSeen=true;persist();G.townIntro=8;}}
   if(e.key === 'Escape') togglePause();
-  if(e.key.toLowerCase()==='o'&&!e.repeat&&['menu','town','paused'].includes(G.mode)){G.returnMode=G.mode;G.mode='settings';}
+  if(e.key.toLowerCase()==='o'&&!e.repeat&&['menu','town','paused'].includes(G.mode)){G.returnMode=G.mode;G.mode='settings';G.turnT=.42;}
   if(G.mode==='archive'&&!e.repeat){const n=G.archiveTab==='creatures'?ENEMY_ORDER.length:CARDS.length;if(e.key==='ArrowLeft')G.archivePage=(G.archivePage+n-1)%n;if(e.key==='ArrowRight')G.archivePage=(G.archivePage+1)%n;}
   if(e.key.toLowerCase() === 'e' && G.mode === 'town') townInteract();
   if(G.mode === 'run' && !e.repeat){
@@ -958,9 +961,9 @@ canvas.addEventListener('contextmenu', e=>e.preventDefault());
 function togglePause(){
   if(G.mode === 'run') G.mode = 'paused';
   else if(G.mode === 'paused') G.mode = 'run';
-  else if(G.mode === 'forge') G.mode = 'town';
-  else if(G.mode === 'archive') G.mode = 'town';
-  else if(G.mode === 'settings') G.mode = G.returnMode||'menu';
+  else if(G.mode === 'forge'){G.mode = 'town';G.turnT=.46;}
+  else if(G.mode === 'archive'){G.mode = 'town';G.turnT=.46;}
+  else if(G.mode === 'settings'){G.mode = G.returnMode||'menu';G.turnT=.42;}
 }
 const mouseWorld = () => ({ x: mouse.x - W/2 + G.cam.x, y: mouse.y - H/2 + G.cam.y });
 
@@ -1072,7 +1075,7 @@ function skillUnlocked(id){return !!id&&SV.wins>=(SKILLS[id]?.wins||0);}
 function activeSkillId(){const id=SV.loadout.implement?.skill||null;return skillUnlocked(id)?id:null;}
 
 function startRun(){
-  G.mode='run'; G.t=0; G.frame=0;
+  G.mode='run';G.turnT=.68; G.t=0; G.frame=0;
   G.enemies.length=0; G.projectiles.length=0; G.eprojectiles.length=0;
   G.gems.length=0; G.drops.length=0; G.pools.length=0; G.corpses.length=0;
   G.minions.length=0; G.fx.length=0; G.floaters.length=0; G.swings.length=0;
@@ -1098,7 +1101,7 @@ function endRun(){
   for(const it of G.runLoot) SV.stash.push(it);
   if(G.t > SV.best) SV.best = G.t;
   persist();
-  G.mode = 'town';
+  G.mode = 'town';G.turnT=.62;
 }
 function say(text, sub){ G.msg = {text, sub, t:3.2}; }
 
@@ -1550,6 +1553,7 @@ function takeCard(c){
 function step(dt){
   dt = Math.min(dt, 1/25);
   G.dt = dt; G.frame++;
+  G.turnT=Math.max(0,G.turnT-dt);
   if(G.mode === 'town'){ updateTown(dt); stepFx(dt); return; }
   if(G.mode !== 'run') { stepFx(dt); return; }
   G.t += dt;
@@ -1979,11 +1983,11 @@ function draw(){
   ctx.fillStyle = PARCH; ctx.fillRect(0,0,W,H);
   if(PAPER){ ctx.fillStyle = PAPER; ctx.fillRect(0,0,W,H); }
 
-  if(G.mode === 'menu'){ drawMenu(); ctx.restore(); drawGrain(); return; }
-  if(G.mode === 'town'){ drawTown(); ctx.restore(); drawGrain(); return; }
-  if(G.mode === 'forge'){ drawForge(); ctx.restore(); drawGrain(); return; }
-  if(G.mode === 'archive'){ drawArchive(); ctx.restore(); drawGrain(); return; }
-  if(G.mode === 'settings'){ drawSettings(); ctx.restore(); drawGrain(); return; }
+  if(G.mode === 'menu'){ drawMenu(); ctx.restore(); drawGrain();drawPageTurn(); return; }
+  if(G.mode === 'town'){ drawTown(); ctx.restore(); drawGrain();drawPageTurn(); return; }
+  if(G.mode === 'forge'){ drawForge(); ctx.restore(); drawGrain();drawPageTurn(); return; }
+  if(G.mode === 'archive'){ drawArchive(); ctx.restore(); drawGrain();drawPageTurn(); return; }
+  if(G.mode === 'settings'){ drawSettings(); ctx.restore(); drawGrain();drawPageTurn(); return; }
 
   const shake=SV.settings.shake?G.shake:0;
   const sx = shake ? rand(shake,-shake) : 0;
@@ -2015,7 +2019,14 @@ function draw(){
   if(G.mode === 'paused')  drawPause();
   if(G.mode === 'dead')    drawEnd(false);
   if(G.mode === 'victory') drawEnd(true);
-  drawGrain();
+  drawGrain();drawPageTurn();
+}
+
+function drawPageTurn(){
+  if(G.turnT<=0){G.turnSound=false;return;}if(!G.turnSound){G.turnSound=true;sfx('turn');}const k=clamp(G.turnT/.68,0,1),cover=k*k,x=W*(1-cover);
+  ctx.save();ctx.fillStyle='rgba(28,23,18,'+(.18*cover)+')';ctx.fillRect(Math.max(0,x-18),0,20,H);
+  ctx.fillStyle=PARCH4;ctx.fillRect(x,0,W-x,H);ctx.strokeStyle=RUBRIC;ctx.globalAlpha=.32+.45*cover;ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(x+5,0);ctx.quadraticCurveTo(x-8,H*.5,x+5,H);ctx.stroke();
+  ctx.strokeStyle='rgba(70,52,30,.10)';ctx.lineWidth=1;for(let y=22;y<H;y+=37){ctx.beginPath();ctx.moveTo(x+12,y);ctx.lineTo(W,y+Math.sin(y)*2);ctx.stroke();}ctx.restore();
 }
 
 function drawGround(){
@@ -2909,7 +2920,7 @@ function drawPause(){
     ctx.fillText(D.name.toUpperCase()+' '+n+(n>=5?'  —  '+D.t5:n>=3?'  —  '+D.t3:'  —  need '+(3-n)+' more'), W/2, y);
     y+=22;
   }
-  if(uiButton(W/2-80,y+12,160,30,'OPTIONS  [O]',INK2,true)){G.returnMode='paused';G.mode='settings';}
+  if(uiButton(W/2-80,y+12,160,30,'OPTIONS  [O]',INK2,true)){G.returnMode='paused';G.mode='settings';G.turnT=.42;}
   ctx.restore();
 }
 function drawEnd(won){
@@ -3016,10 +3027,10 @@ function drawMenu(){
   ctx.fillText('What you write into the horde is the only thing it can drop.', W/2, cy+104);
 
   if(uiButton(W/2-120, H*0.63, 240, 48, 'ENTER THE SCRIPTORIUM', RUBRIC)){
-    G.mode='town';
+    G.mode='town';G.turnT=.62;
     if(!SV.townSeen){ SV.townSeen=true; persist(); G.townIntro=8; }
   }
-  if(uiButton(W/2-80,H*0.63+58,160,28,'OPTIONS  [O]',INK2,true)){G.returnMode='menu';G.mode='settings';}
+  if(uiButton(W/2-80,H*0.63+58,160,28,'OPTIONS  [O]',INK2,true)){G.returnMode='menu';G.mode='settings';G.turnT=.42;}
   ctx.textAlign='center';ctx.fillStyle=SV.wins?RUBRIC:INK2;ctx.font='700 9px Georgia,serif';
   ctx.fillText(SV.wins?SV.wins+' WARDEN'+(SV.wins===1?'':'S')+' FELLED  ·  '+(SV.wins<2?(SV.wins+1)+' / 3 WEAPON SEALS OPEN':'ALL WEAPON SEALS OPEN'):'FIRST IMPRESSION  ·  THE ORCHARD IS UNREAD',W/2,H*.63+108);
 
@@ -3142,9 +3153,9 @@ function resolveWorldCollision(o,r){
 function townInteract(){
   const s=G.townNear; if(!s)return;
   sfx('ui');
-  if(s.id==='forge'){G.forgeMsg=null;G.mode='forge';}
+  if(s.id==='forge'){G.forgeMsg=null;G.mode='forge';G.turnT=.5;}
   if(s.id==='gate') startRun();
-  if(s.id==='archive'){G.archivePage=0;G.archiveTab='pages';G.mode='archive';}
+  if(s.id==='archive'){G.archivePage=0;G.archiveTab='pages';G.mode='archive';G.turnT=.5;}
 }
 function townBuilding(x,y,w,h,title,mark){
   ctx.save(); ctx.translate(x,y);
