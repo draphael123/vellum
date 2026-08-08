@@ -2675,6 +2675,7 @@ function drawHud(){
     ctx.textAlign='left';ctx.fillStyle=S.col;ctx.font='700 12px Georgia,serif';ctx.fillText(S.key,x+7,y+15);
     ctx.font='600 9px Georgia,serif';ctx.fillStyle=INK;ctx.fillText(S.name.toUpperCase(),x+7,y+30);
     if(cd>0){ctx.textAlign='right';ctx.fillStyle=INK;ctx.font='700 11px Georgia,serif';ctx.fillText(cd.toFixed(1),x+box-6,y+15);}
+    else{const pulse=.62+.3*Math.sin(G.t*5);ctx.save();ctx.globalAlpha=pulse;ctx.translate(x+box-11,y+11);ctx.rotate(Math.PI/4);ctx.fillStyle=S.col;ctx.fillRect(-4,-4,8,8);ctx.restore();}
   }
 
   if(touch.used){
