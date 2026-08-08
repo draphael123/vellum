@@ -49,6 +49,7 @@ const BLUEIN = '#3d4a63';
 const ZONE_TIME   = 480;    // seconds until the Orchard-Warden arrives (v0: 8 min)
 const WORLD       = 2600;   // half-extent of the field
 const MAX_ENEMIES = 420;
+const GAME_VERSION = '0.9.0';
 
 /* extra tones for the print: ink is never one flat black in a real impression */
 const INK3   = '#2b241b';
@@ -843,6 +844,7 @@ function loadSave(){
 }
 function persist(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify(SV)); }catch(e){} }
 let SV = loadSave();
+function playtestReport(){return {version:GAME_VERSION,runs:SV.runs,wins:SV.wins,longest:SV.best,mastery:{...SV.mastery},recentRuns:SV.runHistory};}
 
 /* ================================================================== STATE */
 const canvas = document.getElementById('c');
@@ -895,8 +897,10 @@ const G = {
   turnT:0,
   turnSound:false,
   returnMode:'menu', archivePage:0,archiveTab:'pages',
+  archiveCopied:false,
   abandonConfirm:false,
-  binding:'unbound',outcome:'abandoned',
+  binding:'unbound',outcome:'abandoned',practice:false,
+  wanderer:null,wandererSpawned:false,redProcession:false,
   announced:{},
 };
 window.G = G;
@@ -986,8 +990,9 @@ addEventListener('keydown', e=>{
   if(G.mode==='menu'&&e.key==='Enter'){G.mode='town';G.turnT=.62;if(!SV.townSeen){SV.townSeen=true;persist();G.townIntro=8;}}
   if(e.key === 'Escape') togglePause();
   if(e.key.toLowerCase()==='o'&&!e.repeat&&['menu','town','paused'].includes(G.mode)){G.returnMode=G.mode;G.mode='settings';G.turnT=.42;}
-  if(G.mode==='archive'&&!e.repeat){const n=G.archiveTab==='creatures'?ENEMY_ORDER.length:CARDS.length;if(e.key==='ArrowLeft')G.archivePage=(G.archivePage+n-1)%n;if(e.key==='ArrowRight')G.archivePage=(G.archivePage+1)%n;}
+  if(G.mode==='archive'&&G.archiveTab!=='runs'&&!e.repeat){const n=G.archiveTab==='creatures'?ENEMY_ORDER.length:CARDS.length;if(e.key==='ArrowLeft')G.archivePage=(G.archivePage+n-1)%n;if(e.key==='ArrowRight')G.archivePage=(G.archivePage+1)%n;}
   if(e.key.toLowerCase() === 'e' && G.mode === 'town') townInteract();
+  if(e.key.toLowerCase() === 'e' && G.mode === 'run') interactWanderer();
   if(G.mode === 'run' && !e.repeat){
     const id=activeSkillId();
     if(id && e.key.toLowerCase()===SKILLS[id].key.toLowerCase()) castSkill(id);
@@ -1012,6 +1017,7 @@ canvas.addEventListener('touchstart',e=>{
   const r=canvas.getBoundingClientRect();
   for(const q of e.changedTouches){const x=q.clientX-r.left,y=q.clientY-r.top;mouse.x=x;mouse.y=y;
     if(G.mode==='run'){
+      const wx=x-W/2+G.cam.x,wy=y-H/2+G.cam.y;if(G.wanderer&&dist2(wx,wy,G.wanderer.x,G.wanderer.y)<48*48&&dist2(G.player.x,G.player.y,G.wanderer.x,G.wanderer.y)<78*78){interactWanderer();continue;}
       if(x>W-68&&y<96){togglePause();continue;}
       if(G.compare&&Math.abs(x-W/2)<92&&y>H-278&&y<H-232){tryEquipCompare();continue;}
       if(y>H-125&&Math.abs(x-W/2)<85){const id=activeSkillId();if(id)castSkill(id);continue;}
@@ -1147,8 +1153,9 @@ function regionAt(x,y){
 function skillUnlocked(id){const S=SKILLS[id];return !!S&&SV.wins>=(S.wins||0)&&(SV.mastery[S.base]||0)>=(S.mastery||0);}
 function activeSkillId(){const base=SV.loadout.implement?.base,id=SV.inscriptions[base]||SV.loadout.implement?.skill||null;return skillUnlocked(id)?id:null;}
 
-function startRun(){
+function startRun(practice=false){
   G.mode='run';G.turnT=.68; G.t=0; G.frame=0;
+  G.practice=practice;
   G.abandonConfirm=false;
   G.outcome='abandoned';
   G.enemies.length=0; G.projectiles.length=0; G.eprojectiles.length=0;
@@ -1159,18 +1166,21 @@ function startRun(){
   G.boss = null; G.bossWarned=false;G.bossIntro=0;G.bossChapter=''; G.compare=null;
   G.kills=0; G.killsSinceHeal=0; G.corpseCount=0;G.deathCause=null; G.spawnAcc=0; G.wave=0;
   G.skills={}; for(const id of Object.keys(SKILLS)) G.skills[id]=0;
-  G.tutorial=!SV.tutorialDone;
+  G.tutorial=!practice&&!SV.tutorialDone;
   G.region='THE RULED GROVE';G.regionT=0;G.folioT=0;
   G.announced={};
+  G.wanderer=null;G.wandererSpawned=false;G.redProcession=false;
   G.player = makePlayer();
   G.cam.x=0; G.cam.y=0; G.shake=0;G.hitStop=0;
   buildOrchard();
   recompute();
   G.player.hp = G.player.maxhp;
-  SV.runs++; persist();
-  say('THE ROTTING ORCHARD',G.tutorial?'move first; the implement writes by itself':undefined);
+  if(!practice){SV.runs++;persist();}
+  if(practice){for(const [kind,x,y] of [['husk',230,0],['stumpguard',-230,-80],['inkspitter',0,240]]){const e=spawnEnemy(kind,x,y);if(e){e.practice=true;e.hp=e.maxhp*=5;e.spd=0;}}say('THE PROOFING YARD','aim, attack, and test Q; the proofs endlessly reprint');}
+  else say('THE ROTTING ORCHARD',G.tutorial?'move first; the implement writes by itself':undefined);
 }
 function endRun(){
+  if(G.practice){G.practice=false;G.mode='town';G.turnT=.62;return;}
   // materials and found gear always come home
   const reward=binding().reward;
   for(const k of MAT_IDS) SV.mats[k] += Math.round((G.runMats[k]||0)*reward);
@@ -1212,7 +1222,7 @@ const ENEMY_LORE={
   inkspitter:['THE INKSPITTER','ranged pressure','Draws a red line before firing, then sidesteps when timber blocks its quill.'],
   broodpod:['THE BROODPOD','splitting threat','A slow pod that opens into a knot of Rootlings when destroyed.'],
   stumpguard:['THE STUMPGUARD','armoured anchor','Blunts small hits and shelters nearby bodies. Break the guard before the crowd.'],
-  warden:['THE ORCHARD-WARDEN','final authority','Walks after eight minutes, changes pace at half Vellum, and answers with four attack forms.'],
+  warden:['THE ORCHARD-WARDEN','final authority','Walks after eight minutes, changes pace at half Vellum, and answers with five attack forms.'],
 };
 function spawnRate(){
   const m = G.t/60;
@@ -1304,11 +1314,12 @@ function updateBoss(dt){
     if(b.st > b.atkCd){
       b.st = 0;
       const roll = Math.random();
-      b.state = roll < 0.42 ? 'slam' : roll < 0.74 ? 'lash' : 'seed';
+      b.state = b.phase===2&&roll>.86?'cross':roll < 0.42 ? 'slam' : roll < 0.74 ? 'lash' : 'seed';
       if(b.state==='slam') b.tell = {kind:'ring', x:p.x, y:p.y, r:150, t:0, dur:1.15};
       if(b.state==='lash') b.tell = {kind:'line', a:angTo(b.x,b.y,p.x,p.y), t:0, dur:0.95, len:520, wide:44};
       if(b.state==='seed') b.tell = {kind:'seed', t:0, dur:0.8};
-      sfx(b.state==='slam'?'platen':b.state==='lash'?'marginTell':'seedTell');
+      if(b.state==='cross') b.tell = {kind:'cross',x:p.x,y:p.y,t:0,dur:1.05,len:350,wide:34};
+      sfx(b.state==='slam'?'platen':b.state==='lash'||b.state==='cross'?'marginTell':'seedTell');
     }
   } else {
     b.tell.t += dt;
@@ -1328,6 +1339,9 @@ function updateBoss(dt){
         if(rel>0 && rel<T.len && off < T.wide) hurtPlayer(22,'warden');
         for(let i=0;i<10;i++) fx(b.x+dx*(i*50), b.y+dy*(i*50), RUBRIC, 16);
         G.shake = 9;
+      } else if(b.state==='cross'){
+        const T=b.tell,hit=Math.abs(p.x-T.x)<T.wide||Math.abs(p.y-T.y)<T.wide;if(hit)hurtPlayer(28,'warden');
+        for(let i=-7;i<=7;i++){fx(T.x+i*46,T.y,RUBRIC,13);fx(T.x,T.y+i*46,RUBRIC,13);}G.shake=13;sfx('impact',1.25);
       } else {
         for(let i=0;i<9;i++){
           const a = rand(TAU);
@@ -1410,6 +1424,7 @@ function damageEnemy(e, amount, knock, srcA){
     e.vx += Math.cos(a)*knock; e.vy += Math.sin(a)*knock;
   }
   if(G.player.burnOn && e.burn <= 0) e.burn = 3.0;
+  if(e.practice&&e.hp<=0){e.hp=e.maxhp;floater('REPRINTED',e.x,e.y-28,BLUEIN);burst(e.x,e.y,e.r+20,'slam');return;}
   if(e.hp <= 0) killEnemy(e);
 }
 function killEnemy(e){
@@ -1524,8 +1539,16 @@ function boneShard(x,y){
     kind:'shot', life:0, travel:0, range:420, pierce:1, forked:true, r:4, bone:true});
 }
 function heal(n){ const p=G.player; p.hp = Math.min(p.maxhp, p.hp+n); floater('+'+n, p.x, p.y-20, VERD); }
+function interactWanderer(){
+  const w=G.wanderer,p=G.player;if(!w||w.traded||dist2(w.x,w.y,p.x,p.y)>68*68)return;
+  const paid=MAT_IDS.slice().sort((a,b)=>(G.runMats[b]||0)-(G.runMats[a]||0))[0],had=(G.runMats[paid]||0)>=2;
+  if(had)G.runMats[paid]-=2;
+  heal(18);for(const id of Object.keys(G.skills))G.skills[id]=0;p.ward=true;p.wardT=0;w.traded=true;w.t=4;
+  say('A MARGIN MENDED',had?'two materials for a ward and a fresh inscription':'the scribe leaves a kindness in the margin');sfx('page');
+}
 function hurtPlayer(n,source){
   const p = G.player;
+  if(G.practice){floater('NO MARK',p.x,p.y-22,BLUEIN);return;}
   if(p.hurtT > 0) return;
   if(p.ward){ p.ward=false; p.wardT=0; floater('WARD', p.x, p.y-24, GOLD); G.shake=6; return; }
   p.hp -= n; p.hurtT = 0.42; G.shake = Math.max(G.shake, 5);G.hitStop=Math.max(G.hitStop,.045);sfx('hurt');
@@ -1648,6 +1671,9 @@ function step(dt){
   // before its final lesson. It becomes optional only after all four stages.
   if(G.tutorial&&!SV.tutorialDone&&G.t>=32){SV.tutorialDone=true;persist();}
 
+  if(!G.practice&&!G.wandererSpawned&&G.t>=135){const a=rand(TAU);G.wandererSpawned=true;G.wanderer={x:G.player.x+Math.cos(a)*230,y:G.player.y+Math.sin(a)*230,t:55,traded:false};say('A WAYFARING SCRIBE','find the blue seal; two materials can mend the page');}
+  if(G.wanderer){G.wanderer.t-=dt;if(G.wanderer.t<=0)G.wanderer=null;}
+
   const p = G.player;
 
   /* --- movement --- */
@@ -1687,14 +1713,14 @@ function step(dt){
   for(const id of Object.keys(SKILLS)) G.skills[id]=Math.max(0,G.skills[id]-dt);
 
   /* --- spawning --- */
-  if(!G.boss && G.t < ZONE_TIME){
+  if(!G.practice&&!G.boss && G.t < ZONE_TIME){
     G.spawnAcc += spawnRate()*dt;
     while(G.spawnAcc >= 1){ G.spawnAcc -= 1; spawnEnemy(pickKind()); }
     // pressure waves every 45s
     const w = Math.floor(G.t/45);
     if(w > G.wave){ G.wave = w; spawnFormation(w, Math.max(W,H)*0.55); }
   }
-  if(!G.boss && G.t >= ZONE_TIME && G.mode==='run' && !G.bossWarned){ G.bossWarned=true; spawnBoss(); }
+  if(!G.practice&&!G.boss && G.t >= ZONE_TIME && G.mode==='run' && !G.bossWarned){ G.bossWarned=true; spawnBoss(); }
   if(G.boss) updateBoss(dt);
 
   updateSwings(dt);
@@ -1788,6 +1814,8 @@ function updateProjectiles(dt){
         if(G.traits.ember || G.doct.ember>=3) addPool(q.x, q.y, q.blast*0.55, 3.0, false);
         done = true;
       }
+    } else if(b.tell.kind === 'cross'){
+      ctx.globalAlpha=.16+.46*k;ctx.strokeStyle=RUBRIC;ctx.lineWidth=b.tell.wide*2;ctx.beginPath();ctx.moveTo(b.tell.x-b.tell.len,b.tell.y);ctx.lineTo(b.tell.x+b.tell.len,b.tell.y);ctx.moveTo(b.tell.x,b.tell.y-b.tell.len);ctx.lineTo(b.tell.x,b.tell.y+b.tell.len);ctx.stroke();ctx.globalAlpha=.95;ctx.lineWidth=2;ctx.strokeRect(b.tell.x-17,b.tell.y-17,34,34);
     } else {
       if(projectileBlocked(q.x,q.y,q.r)||projectileBlocked((q.x+ox)/2,(q.y+oy)/2,q.r)){fx(q.x,q.y,INK2,3);done=true;}
       for(const e of done?[]:G.enemies){
@@ -2094,6 +2122,7 @@ function draw(){
   drawGems();
   drawDrops();
   drawMinions();
+  drawWanderer();
   drawEnemies();
   if(G.boss) drawBoss();
   drawPlayer();
@@ -2336,6 +2365,11 @@ function drawEnemies(){
   }
 }
 
+function drawWanderer(){
+  const w=G.wanderer;if(!w)return;const near=dist2(w.x,w.y,G.player.x,G.player.y)<78*78,fade=clamp(w.t/2,0,1);ctx.save();ctx.globalAlpha=fade;
+  ctx.fillStyle='rgba(48,36,20,.12)';ctx.beginPath();ctx.ellipse(w.x,w.y+12,18,6,0,0,TAU);ctx.fill();ctx.strokeStyle=BLUEIN;ctx.lineWidth=2;ctx.globalAlpha=.35+.25*Math.sin(G.t*3);ctx.beginPath();ctx.arc(w.x,w.y,28,0,TAU);ctx.stroke();ctx.globalAlpha=fade;blit(SPR.scribe[((G.frame/20)|0)%SPR.scribe.length],w.x,w.y,1,false);
+  ctx.textAlign='center';ctx.fillStyle=BLUEIN;ctx.font='700 9px Georgia,serif';ctx.fillText(w.traded?'THE SCRIBE DEPARTS':near?'E  ·  MEND THE MARGIN':'THE WAYFARING SCRIBE',w.x,w.y-43);if(near&&!w.traded){ctx.fillStyle=INK2;ctx.font='italic 8px Georgia,serif';ctx.fillText('2 materials  ·  heal, ward, reset Q',w.x,w.y-30);}ctx.restore();
+}
 function drawMinions(){
   if(!ART_READY) return;
   for(const m of G.minions){
@@ -2678,9 +2712,9 @@ function drawHud(){
   // clock
   ctx.textAlign='center'; ctx.font='600 26px Georgia, serif'; ctx.fillStyle=INK;
   const left = Math.max(0, ZONE_TIME - G.t);
-  ctx.fillText(G.boss ? fmtTime(G.t) : fmtTime(left), W/2, 38);
+  ctx.fillText(G.practice?'PROOF':G.boss ? fmtTime(G.t) : fmtTime(left), W/2, 38);
   ctx.font='500 10px Georgia, serif'; ctx.fillStyle=INK2;
-  ctx.fillText(G.boss ? 'THE WARDEN WALKS' : 'UNTIL THE WARDEN', W/2, 52);
+  ctx.fillText(G.practice?'NO LOOT  ·  NO HARM':G.boss ? 'THE WARDEN WALKS' : 'UNTIL THE WARDEN', W/2, 52);
 
   // kills + materials
   ctx.textAlign='right'; ctx.font='600 12px Georgia, serif'; ctx.fillStyle=INK;
@@ -2730,7 +2764,7 @@ function drawHud(){
     bar(W/2-bw/2, H-52, bw, 14, G.boss.hp/G.boss.maxhp, INK);
     ctx.textAlign='center'; ctx.font='600 12px Georgia, serif'; ctx.fillStyle=INK;
     ctx.fillText('THE ORCHARD-WARDEN', W/2, H-58);
-    const form=G.boss.state==='slam'?'PLATEN FALL':G.boss.state==='lash'?'RED MARGIN':G.boss.state==='seed'?'BITTER SEED':'THE WARDEN ADVANCES';
+    const form=G.boss.state==='slam'?'PLATEN FALL':G.boss.state==='lash'?'RED MARGIN':G.boss.state==='seed'?'BITTER SEED':G.boss.state==='cross'?'CROSSED OUT':'THE WARDEN ADVANCES';
     ctx.font='italic 500 9px Georgia,serif';ctx.fillStyle=G.boss.state==='chase'?INK2:RUBRIC;
     ctx.fillText(form+'  ·  '+(G.boss.phase===2?'SECOND IMPRESSION':'FIRST IMPRESSION'),W/2,H-73);
   }
@@ -3028,8 +3062,8 @@ function drawPause(){
   const pauseGap=W<380?12:20,pauseW=Math.min(156,(W-44)/2),pauseLeft=W/2-pauseGap/2-pauseW;
   if(uiButton(pauseLeft,y+12,pauseW,30,'CONTINUE',VERD,true)){G.abandonConfirm=false;G.mode='run';}
   if(uiButton(W/2+pauseGap/2,y+12,pauseW,30,'OPTIONS  [O]',INK2,true)){G.abandonConfirm=false;G.returnMode='paused';G.mode='settings';G.turnT=.42;}
-  const leaveLabel=G.abandonConfirm?'CONFIRM  ·  KEEP FOUND GOODS':'END THIS RUN';
-  const leaveW=pauseW*2+pauseGap;if(uiButton(W/2-leaveW/2,y+52,leaveW,30,leaveLabel,G.abandonConfirm?RUBRIC:INK2,true)){if(G.abandonConfirm)endRun();else G.abandonConfirm=true;}
+  const leaveLabel=G.practice?'END PRACTICE':G.abandonConfirm?'CONFIRM  ·  KEEP FOUND GOODS':'END THIS RUN';
+  const leaveW=pauseW*2+pauseGap;if(uiButton(W/2-leaveW/2,y+52,leaveW,30,leaveLabel,G.abandonConfirm?RUBRIC:INK2,true)){if(G.practice||G.abandonConfirm)endRun();else G.abandonConfirm=true;}
   ctx.restore();
 }
 function drawEnd(won){
@@ -3139,9 +3173,11 @@ function drawMenu(){
     G.mode='town';G.turnT=.62;
     if(!SV.townSeen){ SV.townSeen=true; persist(); G.townIntro=8; }
   }
-  if(uiButton(W/2-80,H*0.63+58,160,28,'OPTIONS  [O]',INK2,true)){G.returnMode='menu';G.mode='settings';G.turnT=.42;}
+  if(uiButton(W/2-166,H*0.63+58,156,28,'OPTIONS  [O]',INK2,true)){G.returnMode='menu';G.mode='settings';G.turnT=.42;}
+  if(uiButton(W/2+10,H*0.63+58,156,28,'SEND FEEDBACK',BLUEIN,true))window.open('https://github.com/draphael123/vellum/issues/new?title=VELLUM%20feedback%20v'+GAME_VERSION,'_blank','noopener');
   ctx.textAlign='center';ctx.fillStyle=SV.wins?RUBRIC:INK2;ctx.font='700 9px Georgia,serif';
   ctx.fillText(SV.wins?SV.wins+' WARDEN'+(SV.wins===1?'':'S')+' FELLED  ·  '+(SV.wins<2?(SV.wins+1)+' / 3 WEAPON SEALS OPEN':'ALL WEAPON SEALS OPEN'):'FIRST IMPRESSION  ·  THE ORCHARD IS UNREAD',W/2,H*.63+108);
+  ctx.fillStyle=INK2;ctx.font='500 8px Georgia,serif';ctx.fillText('IMPRESSION '+GAME_VERSION,W/2,H*.63+124);
 
   // the horde, walking the bottom rule
   if(ART_READY){
@@ -3179,6 +3215,7 @@ function drawBindings(){
     else{wrap(B.desc,x+26,y+150,cw-52,18,INK2,'500 13px Georgia,serif');const laws=B.law.split('  ·  ');ctx.fillStyle=B.col;ctx.font='700 9px Georgia,serif';ctx.fillText(laws[0].toUpperCase(),x+cw/2,y+242);if(laws[1])ctx.fillText(laws[1].toUpperCase(),x+cw/2,y+258);ctx.fillStyle=INK2;ctx.font='italic 10px Georgia,serif';ctx.fillText('MATERIAL IMPRESSION  ×'+B.reward.toFixed(2),x+cw/2,y+288);}
     if(hov&&mouse.clicked){G.binding=B.id;SV.lastBinding=B.id;persist();startRun();}
   }
+  if(!G.practice&&!G.redProcession&&G.t>=255){G.redProcession=true;const p=G.player,a=rand(TAU),cx=p.x+Math.cos(a)*Math.max(W,H)*.5,cy=p.y+Math.sin(a)*Math.max(W,H)*.5;for(let i=0;i<7;i++){const q=(i-3)*34,e=spawnEnemy(i%3===0?'bellower':i%2?'stumpguard':'needlekin',cx+Math.cos(a+Math.PI/2)*q,cy+Math.sin(a+Math.PI/2)*q);if(e){e.elite=true;e.hp*=1.65;e.maxhp=e.hp;e.dmg*=1.2;e.xp*=2;}}say('THE RUBRIC PROCESSION','gilded authorities carry a richer impression');sfx('bell');}
   if(uiButton(W/2-80,H-64,160,32,'RETURN TO TOWN',INK2,true)){G.mode='town';G.turnT=.46;}
   ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 10px Georgia,serif';ctx.fillText('Esc returns  ·  bindings alter pressure and material yield, never permanent stats',W/2,H-20);ctx.restore();
 }
@@ -3186,6 +3223,7 @@ const TOWN_SITES = [
   {id:'forge',x:-260,y:8,r:82,name:'THE INK-FORGE',sub:'inscribe, equip, and shatter gear'},
   {id:'archive',x:0,y:-170,r:70,name:'THE BESTIARY',sub:'read the law of the page'},
   {id:'seal',x:0,y:35,r:48,name:'THE WARDEN SEAL',sub:'read the inscriptions opened by victory'},
+  {id:'practice',x:150,y:170,r:44,name:'THE PROOFING YARD',sub:'test the equipped weapon and inscription'},
   {id:'gate',x:265,y:4,r:82,name:'THE ORCHARD GATE',sub:'begin the next descent'},
 ];
 function updateTown(dt){
@@ -3303,6 +3341,7 @@ function townInteract(){
   if(s.id==='gate'){G.binding=SV.lastBinding||'unbound';G.mode='bindings';G.turnT=.5;}
   if(s.id==='archive'){G.archivePage=0;G.archiveTab='pages';G.mode='archive';G.turnT=.5;}
   if(s.id==='seal'){G.townNotice=5;sfx('page');}
+  if(s.id==='practice'){G.binding='unbound';startRun(true);}
 }
 function townBuilding(x,y,w,h,title,mark){
   ctx.save(); ctx.translate(x,y);
@@ -3349,6 +3388,7 @@ function drawTown(){
   ctx.textAlign='center';ctx.fillStyle=RUBRIC;ctx.font='700 8px Georgia,serif';ctx.fillText('THE BINDER',-205,79);
   ctx.strokeStyle=INK2;ctx.lineWidth=2;ctx.setLineDash([7,6]);
   ctx.beginPath();ctx.moveTo(-190,80);ctx.quadraticCurveTo(0,150,190,80);ctx.stroke();ctx.setLineDash([]);
+  ctx.save();ctx.translate(150,170);ctx.fillStyle='rgba(205,184,135,.42)';ctx.beginPath();ctx.ellipse(0,0,44,24,0,0,TAU);ctx.fill();ctx.strokeStyle=INK2;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(0,0,27,0,TAU);ctx.stroke();ctx.strokeStyle=RUBRIC;ctx.beginPath();ctx.moveTo(-16,0);ctx.lineTo(16,0);ctx.moveTo(0,-13);ctx.lineTo(0,13);ctx.stroke();ctx.fillStyle=INK2;ctx.font='700 7px Georgia,serif';ctx.textAlign='center';ctx.fillText('PROOF',0,39);ctx.restore();
   const p=G.townPlayer, f=((p.walk*7)|0)%SPR.scribe.length;
   blit(SPR.scribe[f],p.x,p.y,1,Math.cos(p.face)<0);
   if(G.townNear){
@@ -3411,15 +3451,23 @@ function drawSettings(){
 }
 function drawArchive(){
   ctx.save();ctx.fillStyle=PARCH;ctx.fillRect(0,0,W,H);if(PAPER){ctx.fillStyle=PAPER;ctx.fillRect(0,0,W,H);}
-  const creatures=G.archiveTab==='creatures',list=creatures?ENEMY_ORDER:CARDS;
+  const creatures=G.archiveTab==='creatures',runs=G.archiveTab==='runs',list=runs?(SV.runHistory.length?SV.runHistory:[null]):creatures?ENEMY_ORDER:CARDS;
   G.archivePage=clamp(G.archivePage,0,list.length-1);
   const i=G.archivePage,bw=Math.min(760,W-50),bh=Math.min(540,H-90),x=(W-bw)/2,y=(H-bh)/2+18;
-  ctx.fillStyle=PARCH2;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle=INK;ctx.lineWidth=3;ctx.strokeRect(x,y,bw,bh);ctx.strokeStyle=creatures?VERD:RUBRIC;ctx.lineWidth=1.5;ctx.strokeRect(x+9,y+9,bw-18,bh-18);
+  ctx.fillStyle=PARCH2;ctx.fillRect(x,y,bw,bh);ctx.strokeStyle=INK;ctx.lineWidth=3;ctx.strokeRect(x,y,bw,bh);ctx.strokeStyle=runs?BLUEIN:creatures?VERD:RUBRIC;ctx.lineWidth=1.5;ctx.strokeRect(x+9,y+9,bw-18,bh-18);
   if(uiButton(x+bw-82,y+18,58,26,'RETURN',INK2,true)){G.mode='town';G.turnT=.46;}
-  if(uiButton(W/2-112,y-42,106,30,'PAGES',creatures?INK2:RUBRIC,true)){G.archiveTab='pages';G.archivePage=0;}
-  if(uiButton(W/2+6,y-42,106,30,'CREATURES',creatures?VERD:INK2,true)){G.archiveTab='creatures';G.archivePage=0;}
-  if(creatures){
-    const kind=ENEMY_ORDER[i],bossEntry=kind==='warden',K=bossEntry?{hp:5200,spd:52,dmg:'four forms',xp:'—',col:RUBRIC}:ENEMY_KINDS[kind],lore=ENEMY_LORE[kind],known=!!SV.seenEnemies[kind];
+  if(uiButton(W/2-174,y-42,106,30,'PAGES',!creatures&&!runs?RUBRIC:INK2,true)){G.archiveTab='pages';G.archivePage=0;}
+  if(uiButton(W/2-53,y-42,106,30,'CREATURES',creatures?VERD:INK2,true)){G.archiveTab='creatures';G.archivePage=0;}
+  if(uiButton(W/2+68,y-42,106,30,'RUN LEDGER',runs?BLUEIN:INK2,true)){G.archiveTab='runs';G.archivePage=0;G.archiveCopied=false;}
+  if(runs){
+    ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText('FIELD LEDGER  ·  LAST '+SV.runHistory.length+' IMPRESSION'+(SV.runHistory.length===1?'':'S'),W/2,y+38);
+    ctx.fillStyle=INK;ctx.font='700 27px Georgia,serif';ctx.fillText('WHAT THE ORCHARD RECORDED',W/2,y+78);ctx.strokeStyle=BLUEIN;ctx.beginPath();ctx.moveTo(x+70,y+98);ctx.lineTo(x+bw-70,y+98);ctx.stroke();
+    if(!SV.runHistory.length){ctx.fillStyle=INK2;ctx.font='italic 15px Georgia,serif';ctx.fillText('Complete a descent to leave an impression here.',W/2,y+235);}
+    else{ctx.textAlign='left';ctx.font='700 9px Georgia,serif';ctx.fillStyle=INK2;ctx.fillText('RESULT',x+45,y+125);ctx.fillText('TIME',x+155,y+125);ctx.fillText('FELLED',x+225,y+125);ctx.fillText('IMPLEMENT',x+305,y+125);ctx.fillText('BINDING',x+430,y+125);ctx.fillText('PAGES',x+610,y+125);let ry=y+151;for(const r of SV.runHistory){const B=BINDINGS.find(b=>b.id===r.binding)||BINDINGS[0];ctx.fillStyle=r.outcome==='victory'?VERD:r.outcome==='defeat'?RUBRIC:INK2;ctx.font='700 10px Georgia,serif';ctx.fillText(r.outcome.toUpperCase(),x+45,ry);ctx.fillStyle=INK;ctx.font='500 10px Georgia,serif';ctx.fillText(fmtTime(r.time),x+155,ry);ctx.fillText(r.kills,x+225,ry);ctx.fillText(IMPLEMENTS[r.weapon]?.name||r.weapon,x+305,ry);ctx.fillStyle=B.col;ctx.fillText(B.name.replace('THE ',''),x+430,ry);ctx.fillStyle=INK;ctx.fillText(r.cards.length,x+610,ry);ry+=27;}}
+    ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='italic 10px Georgia,serif';ctx.fillText('Stored only in this browser. Copy it when sending balance feedback.',W/2,y+bh-100);
+    if(uiButton(W/2-120,y+bh-82,240,34,G.archiveCopied?'REPORT COPIED':'COPY PLAYTEST REPORT',BLUEIN,true)){navigator.clipboard?.writeText(JSON.stringify(playtestReport(),null,2)).then(()=>G.archiveCopied=true).catch(()=>{});}
+  }else if(creatures){
+    const kind=ENEMY_ORDER[i],bossEntry=kind==='warden',K=bossEntry?{hp:5200,spd:52,dmg:'five forms',xp:'—',col:RUBRIC}:ENEMY_KINDS[kind],lore=ENEMY_LORE[kind],known=!!SV.seenEnemies[kind];
     ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText('CREATURE LEDGER  ·  ENTRY '+(i+1)+' OF '+ENEMY_ORDER.length,W/2,y+38);
     ctx.fillStyle=known?INK:'rgba(60,48,32,.42)';ctx.font='700 30px Georgia,serif';ctx.fillText(known?lore[0]:'AN UNSEEN CREATURE',W/2,y+82);
     ctx.strokeStyle=known?K.col:INK2;ctx.beginPath();ctx.moveTo(x+70,y+103);ctx.lineTo(x+bw-70,y+103);ctx.stroke();
@@ -3427,7 +3475,7 @@ function drawArchive(){
       const img=bossEntry?SPR.warden:SPR[kind][0],scale=bossEntry?Math.min(1.15,155/(img.height/SS)):Math.min(2.25,150/(img.height/SS));blit(img,W/2,y+270,scale,false);
       ctx.fillStyle=K.col;ctx.font='700 12px Georgia,serif';ctx.fillText(lore[1].toUpperCase(),W/2,y+305);
       wrap(lore[2],x+90,y+342,bw-180,19,INK,'500 14px Georgia,serif');
-      ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText(bossEntry?'VELLUM 5200  ·  PACE 52→70  ·  TWO PHASES  ·  FOUR ATTACK FORMS':'VELLUM '+K.hp+'  ·  PACE '+K.spd+'  ·  CONTACT '+K.dmg+'  ·  INK '+K.xp,W/2,y+410);
+      ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText(bossEntry?'VELLUM 5200  ·  PACE 52→70  ·  TWO PHASES  ·  FIVE ATTACK FORMS':'VELLUM '+K.hp+'  ·  PACE '+K.spd+'  ·  CONTACT '+K.dmg+'  ·  INK '+K.xp,W/2,y+410);
     }else{ctx.fillStyle=INK2;ctx.font='italic 15px Georgia,serif';ctx.fillText('Meet this creature in the Orchard to cut its form into the ledger.',W/2,y+250);}
   }else{
     const c=CARDS[i],known=!!SV.seen[c.id];
@@ -3436,9 +3484,8 @@ function drawArchive(){
     ctx.strokeStyle=known?MATERIALS[c.mat].col:INK2;ctx.beginPath();ctx.moveTo(x+70,y+105);ctx.lineTo(x+bw-70,y+105);ctx.stroke();
     if(known){const dk=MATERIALS[c.mat].kw;ctx.textAlign='left';ctx.fillStyle=VERD;ctx.font='700 12px Georgia,serif';ctx.fillText('THE GIFT',x+64,y+146);wrap(c.boon,x+64,y+174,bw-128,20,INK,'500 15px Georgia,serif');ctx.fillStyle=RUBRIC;ctx.font='700 12px Georgia,serif';ctx.fillText('WHAT IT WRITES INTO THE HORDE',x+64,y+246);wrap(c.curse,x+64,y+274,bw-128,20,RUBRIC,'italic 500 15px Georgia,serif');ctx.fillStyle=MATERIALS[c.mat].col;ctx.font='700 13px Georgia,serif';ctx.fillText('MATERIAL OPENED  ·  '+MATERIALS[c.mat].name.toUpperCase(),x+64,y+360);ctx.fillStyle=INK2;ctx.font='500 12px Georgia,serif';ctx.fillText('Use this material at the Ink-Forge to inscribe '+(dk?DOCTRINES[dk].name.toLowerCase():'unbound')+' gear.',x+64,y+387);ctx.fillStyle=MATERIALS[c.mat].col;ctx.font='700 11px Georgia,serif';ctx.fillText('CURRENTLY HELD  ·  '+SV.mats[c.mat],x+64,y+414);}else{ctx.fillStyle=INK2;ctx.font='italic 15px Georgia,serif';ctx.fillText('Choose this page during a descent to preserve its law here.',W/2,y+220);ctx.strokeStyle='rgba(60,48,32,.25)';for(let n=0;n<7;n++){ctx.beginPath();ctx.moveTo(x+90,y+270+n*24);ctx.lineTo(x+bw-90,y+270+n*24);ctx.stroke();}}
   }
-  if(uiButton(x+34,y+bh-62,100,32,'← PREVIOUS',INK2,true))G.archivePage=(i+list.length-1)%list.length;
-  if(uiButton(x+bw-134,y+bh-62,100,32,'NEXT →',INK2,true))G.archivePage=(i+1)%list.length;
-  ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText('Arrow keys turn entries  ·  Esc returns to town',W/2,y+bh-34);ctx.restore();
+  if(!runs){if(uiButton(x+34,y+bh-62,100,32,'← PREVIOUS',INK2,true))G.archivePage=(i+list.length-1)%list.length;if(uiButton(x+bw-134,y+bh-62,100,32,'NEXT →',INK2,true))G.archivePage=(i+1)%list.length;}
+  ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 11px Georgia,serif';ctx.fillText(runs?'Esc returns to town':'Arrow keys turn entries  ·  Esc returns to town',W/2,y+bh-34);ctx.restore();
 }
 const CRAFT_COST = r => ({0:6, 1:14, 2:30, 3:60})[r];
 
@@ -3659,9 +3706,10 @@ window.sim = function(seconds, dt){
 };
 window.VELLUM = {
   get SV(){ return SV; },
+  get G(){ return G; },
   CARDS, AFFIXES, IMPLEMENTS, DOCTRINES, MATERIALS, RARITY, SLOTS,
-  makeItem, computeDoctrines, startRun, takeCard, spawnEnemy, spawnBoss,
-  recompute, dropGear, scoreItem, hasAffix, mouse,
+  makeItem, computeDoctrines, startRun, endRun, takeCard, spawnEnemy, spawnBoss,
+  recompute, dropGear, scoreItem, hasAffix, castSkill, activeSkillId, mouse,
   equip(it){ SV.loadout[it.slot] = it; recompute(); return it; },
   /* Aim the cursor at a world point — the only way a headless harness can
      drive aimed auto-fire, since the real input is a live mouse position. */

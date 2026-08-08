@@ -8,13 +8,15 @@ VELLUM is a hand-drawn browser action game set inside a living manuscript. Every
 
 ## What is in the current build
 
-- One complete eight-minute combat zone with six visual districts, six interactive landmarks, authored formations, rare elites, and a two-phase boss.
+- One complete eight-minute combat zone with six visual districts, six interactive landmarks, authored formations, rare elites, a wandering Scribe, the Rubric Procession encounter, and a two-phase boss with five attack forms.
 - Nine regular enemy families with distinct roles: pursuit, ranged pressure, support calls, splitting broods, lunges, and protective formations.
 - Twelve manuscript pages. Each page grants a gift, writes a curse into the horde, and opens a material line for the Forge.
 - Three implements with different relationships to cover: Greatsword cleaves, Longbow pierces, and Censer lobs over obstacles.
-- One active inscription per implement. Margin Cut is available immediately; Redline Volley and Black Bloom open through Warden victories.
-- A persistent Scriptorium containing the Ink-Forge, Orchard Gate, unlock monument, page ledger, and creature bestiary.
-- Procedural manuscript audio, page-turn transitions, hit weight, contextual defeat advice, touch controls, and persistent reading settings.
+- Two active inscriptions per implement. The alternate Greatsword, Longbow, and Censer skills open through field mastery; no additional weapon was added in this release.
+- Three pre-run Binding Conditions that trade increased danger for richer material impressions.
+- A persistent Scriptorium containing the Ink-Forge, Orchard Gate, safe Proofing Yard, unlock monument, page ledger, creature bestiary, and local run ledger.
+- Two CC0 musical loops, a full procedural sound-effect layer, page-turn transitions, hit weight, contextual defeat advice, touch controls, and persistent reading settings.
+- Versioned feedback links and an exportable, browser-local playtest report for balance feedback without analytics or accounts.
 
 ## Controls
 
