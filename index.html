@@ -843,6 +843,7 @@ const G = {
   t:0, dt:0, frame:0,
   cam:{x:0,y:0},
   shake:0,
+  hitStop:0,
   player:null,
   enemies:[], projectiles:[], eprojectiles:[], gems:[], drops:[], pools:[],
   walls:[],
@@ -907,6 +908,7 @@ function sfx(id,power=1){
   if(id==='sweep'){noise(.055,.05*power,900);tone(105,.07,'triangle',.045*power,.62);}
   else if(id==='shot'){noise(.035,.035*power,2600);tone(390,.045,'triangle',.025*power,1.6);}
   else if(id==='lob'){tone(150,.12,'sine',.045*power,.62);noise(.05,.025*power,700,.06);}
+  else if(id==='impact'){noise(.13,.11*power,520);tone(58,.16,'triangle',.07*power,.62);}
   else if(id==='hit'){const now=performance.now();if(now-lastHitSound<42)return;lastHitSound=now;noise(.045,.055*power,1100);}
   else if(id==='kill'){tone(92,.07,'square',.025*power,.55);}
   else if(id==='hurt'){noise(.12,.12,500);tone(74,.16,'sawtooth',.09,.55);}
@@ -1088,7 +1090,7 @@ function startRun(){
   G.region='THE RULED GROVE';G.regionT=0;G.folioT=0;
   G.announced={};
   G.player = makePlayer();
-  G.cam.x=0; G.cam.y=0; G.shake=0;
+  G.cam.x=0; G.cam.y=0; G.shake=0;G.hitStop=0;
   buildOrchard();
   recompute();
   G.player.hp = G.player.maxhp;
@@ -1234,6 +1236,7 @@ function updateBoss(dt){
     if(b.tell.t >= b.tell.dur){
       if(b.state==='slam'){
         const T=b.tell;
+        sfx('impact',1.35);
         if(dist2(p.x,p.y,T.x,T.y) < T.r*T.r) hurtPlayer(26,'warden');
         burst(T.x,T.y,T.r,'slam');
         for(const e of G.enemies) if(dist2(e.x,e.y,T.x,T.y)<T.r*T.r) damageEnemy(e, 40, 0);
@@ -1317,7 +1320,7 @@ function damageEnemy(e, amount, knock, srcA){
   // Ironbark Gloss: bark blunts small cuts far more than big ones
   if(e.bark) amount = amount <= 22 ? amount*0.55 : amount - 10;
   if(e.kind==='stumpguard') amount = amount<=24 ? amount*0.62 : amount-7;
-  e.hp -= amount; e.hitT = 0.09;
+  e.hp -= amount; e.hitT = 0.09;if(amount>=30)G.hitStop=Math.max(G.hitStop,.018);
   sfx('hit',clamp(amount/30,.45,1.25));
   if(G.traits.seal && !e.sealSpent && e.hp <= 0 && Math.random()<0.18){
     e.sealSpent=true; e.hp=e.maxhp*0.18;
@@ -1445,7 +1448,7 @@ function hurtPlayer(n,source){
   const p = G.player;
   if(p.hurtT > 0) return;
   if(p.ward){ p.ward=false; p.wardT=0; floater('WARD', p.x, p.y-24, GOLD); G.shake=6; return; }
-  p.hp -= n; p.hurtT = 0.42; G.shake = Math.max(G.shake, 5);sfx('hurt');
+  p.hp -= n; p.hurtT = 0.42; G.shake = Math.max(G.shake, 5);G.hitStop=Math.max(G.hitStop,.045);sfx('hurt');
   floater('-'+Math.round(n), p.x, p.y-18, RUBRIC);
   if(p.hp <= 0){ p.hp = 0;G.deathCause=source||'the horde'; G.mode = 'dead';sfx('dead'); }
 }
@@ -1554,6 +1557,7 @@ function step(dt){
   dt = Math.min(dt, 1/25);
   G.dt = dt; G.frame++;
   G.turnT=Math.max(0,G.turnT-dt);
+  if(G.mode==='run'&&G.hitStop>0){G.hitStop=Math.max(0,G.hitStop-dt);stepFx(dt*.2);return;}
   if(G.mode === 'town'){ updateTown(dt); stepFx(dt); return; }
   if(G.mode !== 'run') { stepFx(dt); return; }
   G.t += dt;
@@ -1690,6 +1694,7 @@ function updateProjectiles(dt){
       let hitE = null;
       for(const e of G.enemies){ const rr=e.r+q.r; if(dist2(q.x,q.y,e.x,e.y)<rr*rr){hitE=e;break;} }
       if(hitE || q.travel >= q.range){
+        sfx('impact');
         burst(q.x,q.y,q.blast,'lob');
         for(const e of G.enemies){
           if(dist2(q.x,q.y,e.x,e.y) < q.blast*q.blast) onHit(e, q.dmg, angTo(q.x,q.y,e.x,e.y));
@@ -1959,7 +1964,7 @@ function updatePickups(dt){
     if(L.kind==='camp'&&!L.used&&near<88*88&&p.hp<p.maxhp){L.used=true;p.hp=Math.min(p.maxhp,p.hp+Math.max(24,p.maxhp*.35));say('THE LAST DESK','a sealed ration restores the scribe');fx(L.x,L.y,GOLD2,14);}
     if(L.kind==='folio'&&!L.read&&near<105*105){L.read=true;say('THE HANGING FOLIO','the field index remains open for one minute');G.folioT=60;}
     if(L.kind==='nest'&&!L.opened&&near<150*150){L.opened=true;say('THE ROOT BROOD','something answers beneath the binding');spawnEnemy('broodpod',L.x,L.y);for(let n=0;n<4;n++){const a=n/4*TAU;spawnEnemy(n%2?'rootling':'stumpguard',L.x+Math.cos(a)*72,L.y+Math.sin(a)*72);}}
-    if(L.kind==='press'&&near<250*250){L.cd-=dt;if(L.cd<=0){L.cd=6;let hit=0;for(const e of G.enemies){if(dist2(e.x,e.y,L.x,L.y)<230*230){damageEnemy(e,28*implPower(),80);hit++;}}if(hit){burst(L.x,L.y,230,'press');say('THE BROKEN PRESS','its platen falls across the clearing');}}}
+    if(L.kind==='press'&&near<250*250){L.cd-=dt;if(L.cd<=0){L.cd=6;let hit=0;for(const e of G.enemies){if(dist2(e.x,e.y,L.x,L.y)<230*230){damageEnemy(e,28*implPower(),80);hit++;}}if(hit){sfx('impact',1.2);burst(L.x,L.y,230,'press');say('THE BROKEN PRESS','its platen falls across the clearing');}}}
     if(L.kind==='effigy'&&!L.awake&&near<130*130){L.awake=true;p.ward=true;p.wardT=0;p.hp=Math.min(p.maxhp,p.hp+15);const e=spawnEnemy('stumpguard',L.x,L.y+95);if(e){e.elite=true;e.hp*=2;e.maxhp=e.hp;e.xp*=3;}say('THE WARDEN EFFIGY','a ward is granted; its keeper wakes');}
   }
 }
