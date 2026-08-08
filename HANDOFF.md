@@ -92,7 +92,7 @@ local file-writing server instead.
 
 **Verified working.** Doctrines compute; skeleton cap holds (6 raised from 40
 kills); the Warden spawns, cycles all four attack states, phases at 50%, and
-dies; `draw()` is clean in all seven modes; ~1.2–1.5 ms/frame at 420 enemies, so
+dies; `draw()` is clean in all current modes; ~1.2–1.5 ms/frame at 420 enemies, so
 there is a lot of perf headroom.
 
 The August polish pass also completed a staged full-zone smoke through 8:04:
