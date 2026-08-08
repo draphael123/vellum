@@ -49,7 +49,7 @@ const BLUEIN = '#3d4a63';
 const ZONE_TIME   = 480;    // seconds until the Orchard-Warden arrives (v0: 8 min)
 const WORLD       = 2600;   // half-extent of the field
 const MAX_ENEMIES = 420;
-const GAME_VERSION = '0.11.0';
+const GAME_VERSION = '0.12.0';
 
 /* extra tones for the print: ink is never one flat black in a real impression */
 const INK3   = '#2b241b';
@@ -2199,6 +2199,7 @@ function draw(){
   ctx.translate(W/2 - G.cam.x + sx, H/2 - G.cam.y + sy);
 
   drawGround();
+  drawAmbientMarks();
   drawHazards();
   drawWaymarks();
   drawLandmarks();
@@ -2293,6 +2294,27 @@ function drawGround(){
     ctx.strokeRect(-WORLD+9,-WORLD+9,WORLD*2-18,WORLD*2-18);
     ctx.restore();
   }
+}
+/* Moving marginalia gives the orchard depth without introducing a second art
+   language. The marks are deliberately sparse and become quieter in combat. */
+function drawAmbientMarks(){
+  const p=G.player;if(!p)return;
+  const crowded=G.enemies.length>28;
+  ctx.save();ctx.lineCap='round';ctx.textAlign='center';
+  for(let i=0;i<(crowded?7:13);i++){
+    const seed=i*91.73,span=920;
+    const x=p.x-span/2+((seed*7+G.t*(10+i%3*4))%span);
+    const y=p.y-span*.42+((seed*13+Math.sin(G.t*.35+i)*70)%(span*.84));
+    ctx.save();ctx.translate(x,y);ctx.rotate(Math.sin(seed+G.t*.28)*.7);ctx.globalAlpha=.055+(i%4)*.012;
+    ctx.fillStyle=i%5===0?RUBRIC:i%3===0?VERD:INK2;
+    ctx.font=(i%4===0?'italic 700 18px':'700 12px')+' Georgia,serif';
+    ctx.fillText(i%4===0?'¶':i%4===1?'❦':i%4===2?'v':'·',0,0);ctx.restore();
+  }
+  const seals={'THE RULED GROVE':['R',INK2],'THE RED MARGIN':['M',RUBRIC],'THE BROKEN PRESS':['P',GOLD],'THE ROOT CELLAR':['V',VERD],'THE PALE ORCHARD':['O',BLUEIN]};
+  const s=seals[G.region]||['R',INK2],sx=Math.round(p.x/520)*520,sy=Math.round(p.y/520)*520;
+  ctx.globalAlpha=.075;ctx.strokeStyle=s[1];ctx.fillStyle=s[1];ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(sx,sy,54,0,TAU);ctx.stroke();ctx.beginPath();ctx.arc(sx,sy,42,0,TAU);ctx.stroke();
+  ctx.font='700 44px Georgia,serif';ctx.fillText(s[0],sx,sy+15);ctx.restore();
 }
 function drawTrees(){
   if(!ART_READY) return;
@@ -2799,6 +2821,9 @@ function bar(x,y,w,h,k,col,bg){
 function drawHud(){
   const p = G.player; if(!p) return;
   ctx.save();
+  // Three quiet paper slips establish hierarchy without boxing in the playfield.
+  ctx.fillStyle='rgba(230,217,184,.72)';ctx.fillRect(12,12,348,60);ctx.fillRect(W/2-82,12,164,47);ctx.fillRect(W-250,12,238,48);
+  ctx.strokeStyle='rgba(61,48,34,.30)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(12,72);ctx.lineTo(360,72);ctx.moveTo(W/2-82,59);ctx.lineTo(W/2+82,59);ctx.moveTo(W-250,60);ctx.lineTo(W-12,60);ctx.stroke();
   // vellum (hp)
   bar(20,20,240,16, p.hp/p.maxhp, RUBRIC);
   ctx.fillStyle = PARCH; ctx.font='600 11px Georgia, serif'; ctx.textAlign='center';
@@ -2827,6 +2852,8 @@ function drawHud(){
     ctx.fillText(MATERIALS[k].name + '  ' + v, W-20, my); my += 16;
   }
   if(touch.used){ctx.fillStyle='rgba(230,217,184,.78)';ctx.fillRect(W-58,62,40,25);ctx.strokeStyle=INK2;ctx.strokeRect(W-58,62,40,25);ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 12px Georgia,serif';ctx.fillText('Ⅱ',W-38,79);}
+
+  drawThreatQuills();
 
   // Doctrine seals: equipment keywords read as stamped notches at a glance.
   ctx.textAlign='center';let sx=34;
@@ -2917,6 +2944,22 @@ function drawHud(){
     ctx.fillStyle='rgba(230,217,184,0.91)';ctx.fillRect(bx,by,bw,52);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1.5;ctx.strokeRect(bx,by,bw,52);
     ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 11px Georgia,serif';ctx.fillText(lines[0],W/2,by+19);
     ctx.fillStyle=INK2;ctx.font='italic 11px Georgia,serif';ctx.fillText(lines[1],W/2,by+38);
+  }
+  ctx.restore();
+}
+/* Off-page enemies become quill nicks on the page edge. Only the nearest
+   threats are shown, so this is tactical information rather than a minimap. */
+function drawThreatQuills(){
+  if(!SV.settings.threatCues||!G.player)return;
+  const p=G.player,cx=W/2,cy=H/2,margin=29;
+  const threats=G.enemies.map(e=>({e,d:Math.hypot(e.x-p.x,e.y-p.y)})).filter(q=>q.d>Math.min(W,H)*.46).sort((a,b)=>a.d-b.d).slice(0,5);
+  ctx.save();ctx.lineCap='round';
+  for(const q of threats){
+    const a=Math.atan2(q.e.y-p.y,q.e.x-p.x),dx=Math.cos(a),dy=Math.sin(a);
+    const tx=dx?((dx>0?W-margin:margin)-cx)/dx:1e6,ty=dy?((dy>0?H-margin:margin)-cy)/dy:1e6,t=Math.min(Math.abs(tx),Math.abs(ty));
+    const x=cx+dx*t,y=cy+dy*t,col=q.e.elite?GOLD:q.e.kind==='inkspitter'?RUBRIC:q.e.kind==='bellower'?GOLD:INK2;
+    ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.globalAlpha=q.e.elite?.9:.48;ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=q.e.elite?2.5:1.5;
+    ctx.beginPath();ctx.moveTo(-12,-5);ctx.lineTo(2,0);ctx.lineTo(-12,5);ctx.stroke();ctx.beginPath();ctx.arc(-15,0,q.e.elite?3:2,0,TAU);ctx.fill();ctx.restore();
   }
   ctx.restore();
 }
@@ -3474,6 +3517,14 @@ function drawTown(){
   townBuilding(-285,-20,170,132,'INK-FORGE',RUBRIC);
   townBuilding(0,-195,184,100,'BESTIARY',BLUEIN);
   townBuilding(285,-20,170,132,'ORCHARD GATE',VERD);
+  // Workshop motion makes the safe page feel occupied while preserving the
+  // same line-and-ink construction as the combat zone.
+  ctx.save();ctx.globalAlpha=.16;ctx.strokeStyle=INK2;ctx.lineWidth=2;
+  for(let i=0;i<3;i++){const y=-92-i*17-((G.t*9+i*13)%24),x=-315+Math.sin(G.t*.8+i)*7;ctx.beginPath();ctx.arc(x,y,8+i*3,-2.6,.6);ctx.stroke();}
+  ctx.globalAlpha=.72;for(let i=0;i<5;i++){const a=G.t*1.7+i*1.26,r=10+(i%2)*7;ctx.fillStyle=i%2?GOLD:RUBRIC2;ctx.beginPath();ctx.arc(-285+Math.cos(a)*r,42-Math.abs(Math.sin(a))*20,1.5,0,TAU);ctx.fill();}
+  ctx.strokeStyle=VERD;ctx.lineWidth=2;ctx.globalAlpha=.55;for(let i=0;i<7;i++){const a=-2.65+i*.28,w=18+Math.sin(G.t*1.2+i)*3;ctx.beginPath();ctx.moveTo(285+Math.cos(a)*63,-65+Math.sin(a)*22);ctx.lineTo(285+Math.cos(a)*63+Math.cos(a-.4)*w,-65+Math.sin(a)*22+Math.sin(a-.4)*w);ctx.stroke();}
+  ctx.globalAlpha=.55;ctx.strokeStyle=BLUEIN;for(const x of [-48,0,48]){const sway=Math.sin(G.t*.7+x)*3;ctx.beginPath();ctx.moveTo(x,-252);ctx.lineTo(x+sway,-231);ctx.stroke();ctx.strokeRect(x-13+sway,-231,26,35);}
+  ctx.restore();
   ctx.textAlign='center';ctx.font='700 9px Georgia,serif';
   ctx.fillStyle=RUBRIC;ctx.fillText(SV.stash.length+' STORED  ·  '+SLOTS.filter(s=>SV.loadout[s]).length+' WORN',-285,64);
   ctx.fillStyle=BLUEIN;ctx.fillText(Object.keys(SV.seen).length+'/'+CARDS.length+' PAGES  ·  '+Object.keys(SV.seenEnemies).length+'/'+ENEMY_ORDER.length+' CREATURES',0,-126);
