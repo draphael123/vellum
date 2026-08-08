@@ -965,17 +965,22 @@ function buildOrchard(){
   for(let i=0;i<60;i++){
     G.blots.push({ x:rand(WORLD*2,-WORLD), y:rand(WORLD*2,-WORLD), r:rand(90,26), a:rand(0.055,0.015) });
   }
-  // Broken printer's rules create readable lanes without enclosing the player.
-  for(let i=0;i<14;i++){
-    const a=rand(TAU), d=rand(WORLD-360,420), long=rand(190,105), thick=rand(30,20);
-    const vertical=Math.random()<0.5;
-    G.walls.push({x:Math.cos(a)*d,y:Math.sin(a)*d,w:vertical?thick:long,h:vertical?long:thick});
+  // Purposeful cover: fallen trunks, root shelves and collapsed type. Placement
+  // rejects intersections so the field never produces accidental Tetris glyphs.
+  let tries=0;
+  while(G.walls.length<18&&tries++<300){
+    const a=rand(TAU),d=rand(WORLD-320,470),long=rand(220,120),thick=rand(34,22),vertical=Math.random()<0.5;
+    const x=Math.cos(a)*d,y=Math.sin(a)*d;
+    if(G.walls.some(o=>Math.hypot(o.x-x,o.y-y)<Math.max(long,o.w,o.h)+95))continue;
+    const kind=pick(['trunk','trunk','roots','type']);
+    G.walls.push({x,y,w:vertical?thick:long,h:vertical?long:thick,kind,hp:kind==='type'?90:999,maxhp:kind==='type'?90:999,seed:randi(9999)});
   }
   G.landmarks.push(
     {kind:'press',x:-920,y:-180,name:'THE BROKEN PRESS'},
-    {kind:'shrine',x:760,y:-720,name:'THE HANGING LEAF'},
-    {kind:'well',x:-520,y:880,name:'THE BLACK WELL'},
-    {kind:'camp',x:940,y:690,name:'THE LAST DESK'},
+    {kind:'folio',x:760,y:-720,name:'THE HANGING FOLIO'},
+    {kind:'well',x:-520,y:880,name:'THE BLACK WELL',charge:0},
+    {kind:'camp',x:940,y:690,name:'THE LAST DESK',used:false},
+    {kind:'nest',x:-1180,y:720,name:'THE ROOT BROOD',opened:false},
     {kind:'effigy',x:0,y:-1380,name:'THE WARDEN EFFIGY'}
   );
 }
@@ -1766,6 +1771,25 @@ function updatePools(dt){
 
 function updatePickups(dt){
   const p = G.player;
+  // The Black Well gathers loose ink into a legible, valuable bead. This keeps
+  // late waves from becoming a carpet of identical black flecks without
+  // deleting any earned experience.
+  const well=G.landmarks.find(L=>L.kind==='well');
+  if(well){
+    let gathered=0;
+    for(let i=G.gems.length-1;i>=0&&gathered<3;i--){
+      const g=G.gems[i],d=Math.hypot(g.x-well.x,g.y-well.y);
+      if(d<245&&d>24){const a=angTo(g.x,g.y,well.x,well.y),pull=(260-d)*1.6;g.x+=Math.cos(a)*pull*dt;g.y+=Math.sin(a)*pull*dt;}
+      if(d<27){well.charge+=g.v;G.gems.splice(i,1);gathered++;}
+    }
+    if(well.charge>=8){G.gems.push({x:well.x,y:well.y-18,v:well.charge,vx:rand(34,-34),vy:-55,t:0,large:true});well.charge=0;fx(well.x,well.y,BLUEIN,8);}
+  }
+  // Merge the oldest nearby droplets when the page gets busy. Value is
+  // conserved, while the remaining beads become easier to distinguish.
+  if(G.gems.length>95){
+    const a=G.gems[0];
+    for(let j=G.gems.length-1;j>0;j--){const b=G.gems[j];if(dist2(a.x,a.y,b.x,b.y)<90*90){a.v+=b.v;a.large=true;G.gems.splice(j,1);if(G.gems.length<=82)break;}}
+  }
   for(let i=G.gems.length-1;i>=0;i--){
     const g = G.gems[i]; g.t += dt;
     g.x += g.vx*dt; g.y += g.vy*dt; g.vx*=Math.pow(0.002,dt); g.vy*=Math.pow(0.002,dt);
@@ -1775,7 +1799,8 @@ function updatePickups(dt){
       const pull = 340 * (1 - Math.sqrt(d2)/p.pickup) + 120;
       g.x += Math.cos(a)*pull*dt; g.y += Math.sin(a)*pull*dt;
     }
-    if(d2 < 20*20){ gainXp(g.v); G.gems.splice(i,1); }
+    const grab=16+Math.min(10,Math.sqrt(g.v)*2);
+    if(d2 < grab*grab){ gainXp(g.v); G.gems.splice(i,1); }
   }
   for(let i=G.drops.length-1;i>=0;i--){
     const d = G.drops[i]; d.t += dt; d.bob += dt*2.4;
@@ -1787,6 +1812,12 @@ function updatePickups(dt){
       G.compare = {item:d.item, t:6.0};
       G.drops.splice(i,1);
     }
+  }
+  for(const L of G.landmarks){
+    const near=dist2(p.x,p.y,L.x,L.y);
+    if(L.kind==='camp'&&!L.used&&near<88*88&&p.hp<p.maxhp){L.used=true;p.hp=Math.min(p.maxhp,p.hp+Math.max(24,p.maxhp*.35));say('THE LAST DESK','a sealed ration restores the scribe');fx(L.x,L.y,GOLD2,14);}
+    if(L.kind==='folio'&&!L.read&&near<105*105){L.read=true;say('THE HANGING FOLIO','its torn map names every district');G.regionT=7;}
+    if(L.kind==='nest'&&!L.opened&&near<150*150){L.opened=true;say('THE ROOT BROOD','something answers beneath the binding');spawnEnemy('broodpod',L.x,L.y);for(let n=0;n<4;n++){const a=n/4*TAU;spawnEnemy(n%2?'rootling':'stumpguard',L.x+Math.cos(a)*72,L.y+Math.sin(a)*72);}}
   }
 }
 
@@ -1853,6 +1884,13 @@ function drawGround(){
     ctx.fillStyle = PAPER;
     ctx.fillRect(x0-40, y0-40, (x1-x0)+80, (y1-y0)+80);
     ctx.restore();
+  }
+  // District washes sit under every actor and prop, never over the player.
+  const washes=[[-950,-220,700,BLUEIN,0.055],[720,-620,760,RUBRIC,0.045],[-520,900,720,INK,0.065],[980,720,620,GOLD,0.04],[0,-1420,650,VERD,0.05]];
+  for(const [wx,wy,wr,wc,wa] of washes){
+    if(wx+wr<x0||wx-wr>x1||wy+wr<y0||wy-wr>y1)continue;
+    const g=ctx.createRadialGradient(wx,wy,20,wx,wy,wr);g.addColorStop(0,wc);g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.save();ctx.globalAlpha=wa;ctx.fillStyle=g;ctx.beginPath();ctx.arc(wx,wy,wr,0,TAU);ctx.fill();ctx.restore();
   }
   // ruling: a page prepared for writing, plus a red margin rule
   ctx.strokeStyle = 'rgba(80,64,40,0.07)'; ctx.lineWidth = 1;
@@ -2142,9 +2180,6 @@ function drawPlayer(){
     ctx.save();ctx.strokeStyle=GOLD;ctx.globalAlpha=0.55;ctx.lineWidth=2;
     ctx.beginPath();ctx.arc(p.x,p.y-2,21,-Math.PI/2,-Math.PI/2+TAU*clamp(p.wardT/wardMax,0,1));ctx.stroke();ctx.restore();
   }
-  // Each district is a different damaged impression of the same page.
-  const washes=[[-950,-220,700,BLUEIN,0.035],[720,-620,760,RUBRIC,0.035],[-520,900,720,INK,0.055],[980,720,620,GOLD,0.025],[0,-1420,650,VERD,0.035]];
-  for(const [wx,wy,wr,wc,wa] of washes){const g=ctx.createRadialGradient(wx,wy,20,wx,wy,wr);g.addColorStop(0,wc);g.addColorStop(1,'rgba(0,0,0,0)');ctx.save();ctx.globalAlpha=wa;ctx.fillStyle=g;ctx.beginPath();ctx.arc(wx,wy,wr,0,TAU);ctx.fill();ctx.restore();}
   ctx.restore();
 }
 function drawImplement(p, a){
@@ -2216,13 +2251,15 @@ function drawProjectiles(){
   }
 }
 function drawGems(){
-  // spilled ink, drawn as a teardrop leaning into its own motion
+  // Small drops are ink; condensed experience becomes a blue-rimmed seal.
   for(const g of G.gems){
     const sp = Math.hypot(g.vx,g.vy);
+    const s=clamp(1+Math.sqrt(g.v)*.38,1.15,2.5);
     ctx.save();
-    ctx.translate(g.x,g.y);
+    ctx.translate(g.x,g.y);ctx.scale(s,s);
     ctx.rotate(sp>4 ? Math.atan2(g.vy,g.vx) : Math.sin(g.t*2)*0.3 + Math.PI/2);
-    ctx.fillStyle = INK;
+    if(g.large||g.v>=6){ctx.strokeStyle=BLUEIN;ctx.globalAlpha=.55;ctx.lineWidth=1.2;ctx.beginPath();ctx.arc(0,0,6+Math.sin(g.t*4),0,TAU);ctx.stroke();ctx.globalAlpha=1;}
+    ctx.fillStyle = g.large||g.v>=6?INK3:INK;
     ctx.beginPath();
     ctx.moveTo(5.2,0);
     ctx.quadraticCurveTo(1.2,2.6,-2.6,0.9);
@@ -2468,20 +2505,39 @@ function drawHud(){
 }
 function drawLandmarks(){
   for(const L of G.landmarks){
-    ctx.save();ctx.translate(L.x,L.y);ctx.strokeStyle=INK;ctx.fillStyle=INK3;ctx.lineWidth=3;
+    ctx.save();ctx.translate(L.x,L.y);ctx.strokeStyle=INK;ctx.fillStyle=INK3;ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';
+    ctx.fillStyle='rgba(48,36,20,.11)';ctx.beginPath();ctx.ellipse(5,45,62,12,0,0,TAU);ctx.fill();ctx.fillStyle=INK3;
     if(L.kind==='press'){
-      ctx.fillRect(-52,-30,104,60);ctx.fillStyle=PARCH2;ctx.fillRect(-34,-19,68,38);ctx.strokeRect(-64,31,128,8);
-      for(const x of [-45,45]){ctx.beginPath();ctx.arc(x,40,15,0,TAU);ctx.stroke();}
-    }else if(L.kind==='shrine'){
-      ctx.beginPath();ctx.moveTo(-42,34);ctx.lineTo(0,-48);ctx.lineTo(42,34);ctx.closePath();ctx.stroke();ctx.fillStyle=RUBRIC;ctx.beginPath();ctx.ellipse(0,-4,13,20,0,0,TAU);ctx.fill();
+      // A warped field press: timber frame, screw, platen, and a torn proof.
+      ctx.fillRect(-55,-48,10,91);ctx.fillRect(45,-48,10,91);ctx.fillRect(-62,-51,124,9);ctx.fillRect(-67,39,134,10);
+      ctx.strokeStyle=RUBRIC;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-72);ctx.lineTo(0,13);ctx.moveTo(-24,-66);ctx.lineTo(24,-66);ctx.stroke();
+      ctx.fillStyle=PARCH2;ctx.fillRect(-35,1,70,31);ctx.strokeStyle=INK;ctx.strokeRect(-35,1,70,31);ctx.strokeStyle=INK2;ctx.lineWidth=1;for(let y=8;y<28;y+=6){ctx.beginPath();ctx.moveTo(-27,y);ctx.lineTo(23+(y%4)*2,y);ctx.stroke();}
+      ctx.fillStyle=RUBRIC;ctx.fillRect(-30,16,18,3);
+    }else if(L.kind==='folio'){
+      // Pages tied to a bent bough, each one carrying a fragment of the map.
+      ctx.strokeStyle=INK;ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(-54,36);ctx.quadraticCurveTo(-5,-64,58,-38);ctx.stroke();
+      for(let i=-2;i<=2;i++){const x=i*19,y=-37+Math.abs(i)*5;ctx.strokeStyle=INK2;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+13);ctx.stroke();ctx.fillStyle=i===0?PARCH4:PARCH2;ctx.fillRect(x-8,y+12,16,25);ctx.strokeStyle=i===0?RUBRIC:INK3;ctx.strokeRect(x-8,y+12,16,25);ctx.beginPath();ctx.moveTo(x-5,y+20);ctx.lineTo(x+5,y+20);ctx.moveTo(x-5,y+25);ctx.lineTo(x+3,y+25);ctx.stroke();}
     }else if(L.kind==='well'){
-      ctx.beginPath();ctx.ellipse(0,8,52,24,0,0,TAU);ctx.fill();ctx.strokeStyle=RUBRIC;ctx.beginPath();ctx.ellipse(0,5,35,14,0,0,TAU);ctx.stroke();
+      ctx.fillStyle=INK3;for(let i=0;i<9;i++){const a=i/9*TAU;ctx.beginPath();ctx.arc(Math.cos(a)*42,10+Math.sin(a)*18,13,0,TAU);ctx.fill();}
+      ctx.fillStyle=INK;ctx.beginPath();ctx.ellipse(0,7,36,14,0,0,TAU);ctx.fill();ctx.strokeStyle=BLUEIN;ctx.globalAlpha=.65;ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(0,7,28+Math.sin(G.t*2)*2,9,0,0,TAU);ctx.stroke();ctx.globalAlpha=1;
+      ctx.strokeStyle=INK3;ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-47,8);ctx.lineTo(-47,-50);ctx.quadraticCurveTo(0,-76,47,-50);ctx.lineTo(47,8);ctx.stroke();
+      if(L.charge){ctx.fillStyle=BLUEIN;ctx.beginPath();ctx.arc(0,-8,3+Math.min(6,L.charge/2),0,TAU);ctx.fill();}
     }else if(L.kind==='camp'){
-      ctx.fillRect(-48,8,96,12);ctx.fillRect(-38,20,7,30);ctx.fillRect(31,20,7,30);ctx.strokeStyle=RUBRIC;ctx.strokeRect(-30,-25,60,32);
+      ctx.fillStyle=INK3;ctx.fillRect(-54,7,108,10);ctx.fillRect(-43,17,7,34);ctx.fillRect(36,17,7,34);
+      ctx.fillStyle=PARCH2;ctx.fillRect(-31,-20,60,28);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1.5;ctx.strokeRect(-31,-20,60,28);ctx.beginPath();ctx.moveTo(-25,-13);ctx.lineTo(18,-13);ctx.moveTo(-25,-6);ctx.lineTo(9,-6);ctx.stroke();
+      ctx.fillStyle=L.used?INK2:GOLD2;ctx.beginPath();ctx.arc(42,-16,8,0,TAU);ctx.fill();ctx.strokeStyle=INK;ctx.beginPath();ctx.moveTo(42,-8);ctx.lineTo(42,5);ctx.stroke();
+      ctx.strokeStyle=INK3;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-64,40);ctx.lineTo(-64,-29);ctx.lineTo(-28,3);ctx.stroke();
+    }else if(L.kind==='nest'){
+      ctx.strokeStyle=INK3;for(let i=0;i<11;i++){const a=i/11*TAU,r=35+(i%3)*7;ctx.lineWidth=3+(i%2);ctx.beginPath();ctx.moveTo(Math.cos(a)*8,Math.sin(a)*5);ctx.quadraticCurveTo(Math.cos(a+.6)*r*.6,Math.sin(a+.6)*r*.6,Math.cos(a)*r,Math.sin(a)*r*.62+8);ctx.stroke();}
+      ctx.fillStyle=L.opened?RUBRIC:INK;ctx.beginPath();ctx.ellipse(0,8,L.opened?20:11,L.opened?13:7,0,0,TAU);ctx.fill();
+      if(!L.opened){ctx.strokeStyle=PARCH3;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-4,4);ctx.lineTo(4,12);ctx.moveTo(4,4);ctx.lineTo(-4,12);ctx.stroke();}
     }else{
-      ctx.beginPath();ctx.moveTo(0,-70);ctx.lineTo(0,50);ctx.moveTo(-36,-30);ctx.lineTo(36,-30);ctx.stroke();ctx.fillStyle=RUBRIC;ctx.beginPath();ctx.arc(0,-52,14,0,TAU);ctx.fill();
+      // Bound branches form a recognisable orchard warden, never a UI cross.
+      ctx.strokeStyle=INK3;ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(0,47);ctx.quadraticCurveTo(-5,-7,0,-41);ctx.moveTo(-3,-20);ctx.lineTo(-40,-45);ctx.moveTo(3,-20);ctx.lineTo(42,-47);ctx.stroke();
+      ctx.lineWidth=3;for(const s of [-1,1]){ctx.beginPath();ctx.moveTo(s*22,-34);ctx.lineTo(s*28,-61);ctx.moveTo(s*33,-40);ctx.lineTo(s*49,-63);ctx.stroke();}
+      ctx.fillStyle=RUBRIC;ctx.beginPath();ctx.moveTo(0,-45);ctx.lineTo(-11,-28);ctx.lineTo(0,-9);ctx.lineTo(11,-28);ctx.closePath();ctx.fill();ctx.strokeStyle=PARCH3;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(-5,-28);ctx.lineTo(5,-28);ctx.stroke();
     }
-    ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='700 10px Georgia,serif';ctx.fillText(L.name,0,72);ctx.restore();
+    ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='700 10px Georgia,serif';ctx.fillText(L.name,0,78);ctx.restore();
   }
 }
 function spawnFormation(w,radius){
@@ -2785,14 +2841,24 @@ function updateTown(dt){
   if(G.townIntro>0) G.townIntro-=dt;
 }
 function drawBarriers(){
-  // Printer's rules: strips of blackened wood and torn marginalia.
   for(const w of G.walls){
-    ctx.fillStyle=INK3;ctx.fillRect(w.x-w.w/2,w.y-w.h/2,w.w,w.h);
-    ctx.strokeStyle=PARCH3;ctx.globalAlpha=0.42;ctx.lineWidth=1;
-    const vertical=w.h>w.w;
-    for(let n=-0.4;n<=0.4;n+=0.16){ctx.beginPath();if(vertical){ctx.moveTo(w.x+n*w.w,w.y-w.h/2+5);ctx.lineTo(w.x+n*w.w,w.y+w.h/2-5);}else{ctx.moveTo(w.x-w.w/2+5,w.y+n*w.h);ctx.lineTo(w.x+w.w/2-5,w.y+n*w.h);}ctx.stroke();}
-    ctx.globalAlpha=1;ctx.strokeStyle=RUBRIC;ctx.strokeRect(w.x-w.w/2+3,w.y-w.h/2+3,w.w-6,w.h-6);
+    const vertical=w.h>w.w,len=vertical?w.h:w.w,thick=vertical?w.w:w.h;
+    ctx.save();ctx.translate(w.x,w.y);if(vertical)ctx.rotate(Math.PI/2);
+    ctx.fillStyle='rgba(48,36,20,0.12)';ctx.beginPath();ctx.ellipse(5,thick*.42,len*.48,thick*.34,0,0,TAU);ctx.fill();
+    if(w.kind==='trunk'){
+      ctx.fillStyle=INK3;ctx.beginPath();ctx.moveTo(-len/2+5,-thick*.34);ctx.quadraticCurveTo(0,-thick*.58,len/2-4,-thick*.27);ctx.lineTo(len/2,thick*.28);ctx.quadraticCurveTo(0,thick*.52,-len/2,thick*.22);ctx.closePath();ctx.fill();
+      ctx.strokeStyle=PARCH3;ctx.globalAlpha=.42;ctx.lineWidth=1.2;for(let n=-len*.36;n<len*.38;n+=18){ctx.beginPath();ctx.moveTo(n,-thick*.25);ctx.quadraticCurveTo(n+7,0,n+2,thick*.24);ctx.stroke();}
+      ctx.globalAlpha=1;ctx.strokeStyle=INK;ctx.lineWidth=3;for(const s of [-1,1]){ctx.beginPath();ctx.moveTo(s*len*.28,0);ctx.lineTo(s*len*.38,-thick*.75);ctx.moveTo(s*len*.36,0);ctx.lineTo(s*len*.47,thick*.65);ctx.stroke();}
+    }else if(w.kind==='roots'){
+      ctx.strokeStyle=INK3;ctx.lineCap='round';for(let j=-2;j<=2;j++){ctx.lineWidth=4-Math.abs(j)*.45;ctx.beginPath();ctx.moveTo(-len/2,j*4);for(let n=1;n<=6;n++)ctx.lineTo(-len/2+n*len/6,j*4+Math.sin(n*1.9+j+w.seed)*7);ctx.stroke();}
+      ctx.strokeStyle=VERD;ctx.globalAlpha=.55;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(-len/2,0);ctx.lineTo(len/2,0);ctx.stroke();
+    }else{
+      const blocks=Math.max(4,Math.floor(len/25));for(let j=0;j<blocks;j++){const x=-len/2+j*(len/blocks)+2,bw=len/blocks-4;ctx.fillStyle=j%3===0?INK:INK3;ctx.fillRect(x,-thick/2+(j%2)*3,bw,thick-4);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1;ctx.strokeRect(x+2,-thick/2+5+(j%2)*3,bw-4,thick-14);ctx.fillStyle=PARCH3;ctx.font='700 9px Georgia,serif';ctx.textAlign='center';ctx.fillText(String.fromCharCode(65+(w.seed+j)%26),x+bw/2,4+(j%2)*3);}
+      if(w.hp<w.maxhp){ctx.strokeStyle=PARCH4;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-8,-thick/2);ctx.lineTo(4,0);ctx.lineTo(-3,thick/2);ctx.stroke();}
+    }
+    ctx.restore();
   }
+
 }
 
 /* The active skill is a positioning verb, not another item tree. Its cooldown
@@ -2810,6 +2876,15 @@ function castSkill(id){
       if(dist2(p.x,p.y,e.x,e.y)>reach*reach||Math.abs(angDiff(angTo(p.x,p.y,e.x,e.y),a))>arc/2)continue;
       e.vx+=Math.cos(a)*460;e.vy+=Math.sin(a)*460;
     }
+    // Margin Cut can literally revise collapsed type out of the path. Natural
+    // cover remains permanent, so the player still has tactical separators.
+    for(let i=G.walls.length-1;i>=0;i--){
+      const w=G.walls[i];if(w.kind!=='type')continue;
+      const wa=angTo(p.x,p.y,w.x,w.y);
+      if(dist2(p.x,p.y,w.x,w.y)>reach*reach||Math.abs(angDiff(wa,a))>arc/2)continue;
+      w.hp-=48;fx(w.x,w.y,RUBRIC,9);
+      if(w.hp<=0){G.walls.splice(i,1);G.runMats.heartwood=(G.runMats.heartwood||0)+2;floater('+2 HEARTWOOD',w.x,w.y-25,VERD);}
+    }
     say('MARGIN CUT','the crowd is revised outward');
   }
 }
@@ -2826,6 +2901,10 @@ function resolveWorldCollision(o,r){
       const dl=o.x-l,dr=rr-o.x,dt=o.y-t,db=b-o.y,m=Math.min(dl,dr,dt,db);
       if(m===dl)o.x=l;else if(m===dr)o.x=rr;else if(m===dt)o.y=t;else o.y=b;
     }
+  }
+  for(const L of G.landmarks){
+    const cr=L.kind==='press'?55:L.kind==='well'?45:L.kind==='nest'?34:L.kind==='effigy'?22:0;
+    if(cr)resolveCircleBody(o,r,L.x,L.y+12,cr);
   }
 }
 function townInteract(){
