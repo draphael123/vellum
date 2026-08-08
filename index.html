@@ -1065,7 +1065,7 @@ const ENEMY_KINDS = {
   broodpod:{hp:52, spd:54,  r:18, dmg:9,  xp:3, col:VERD, w:0},     // splits into rootlings when opened
   stumpguard:{hp:128,spd:48,r:22, dmg:17, xp:5, col:INK3, w:0},     // a heavily carved moving wall
 };
-const ENEMY_ORDER=['husk','creeper','bloat','rootling','needlekin','bellower','inkspitter','broodpod','stumpguard'];
+const ENEMY_ORDER=['husk','creeper','bloat','rootling','needlekin','bellower','inkspitter','broodpod','stumpguard','warden'];
 const ENEMY_LORE={
   husk:['THE HUSK','common pressure','Closes steadily and becomes the carrier for most laws written into the horde.'],
   creeper:['THE CREEPER','fast pursuit','Punishes straight retreats. Turn it through trunks before it reaches the scribe.'],
@@ -1076,6 +1076,7 @@ const ENEMY_LORE={
   inkspitter:['THE INKSPITTER','ranged pressure','Draws a red line before firing. Timber and landmarks stop the quill.'],
   broodpod:['THE BROODPOD','splitting threat','A slow pod that opens into a knot of Rootlings when destroyed.'],
   stumpguard:['THE STUMPGUARD','armoured anchor','Blunts small hits and gives the horde a durable moving wall.'],
+  warden:['THE ORCHARD-WARDEN','final authority','Walks after eight minutes, changes pace at half Vellum, and answers with four attack forms.'],
 };
 function spawnRate(){
   const m = G.t/60;
@@ -1143,6 +1144,7 @@ function spawnBoss(){
     r:56, hp:5200, maxhp:5200, spd:52, phase:1,
     state:'chase', st:0, tell:null, atkCd:3.2, hitT:0, slow:0, burn:0,
   };
+  if(!SV.seenEnemies.warden){SV.seenEnemies.warden=true;persist();}
   say('THE ORCHARD-WARDEN', 'it has read every page you wrote');
   G.shake = 16;
 }
@@ -3120,15 +3122,15 @@ function drawArchive(){
   if(uiButton(W/2-112,y-42,106,30,'PAGES',creatures?INK2:RUBRIC,true)){G.archiveTab='pages';G.archivePage=0;}
   if(uiButton(W/2+6,y-42,106,30,'CREATURES',creatures?VERD:INK2,true)){G.archiveTab='creatures';G.archivePage=0;}
   if(creatures){
-    const kind=ENEMY_ORDER[i],K=ENEMY_KINDS[kind],lore=ENEMY_LORE[kind],known=!!SV.seenEnemies[kind];
+    const kind=ENEMY_ORDER[i],bossEntry=kind==='warden',K=bossEntry?{hp:5200,spd:52,dmg:'four forms',xp:'—',col:RUBRIC}:ENEMY_KINDS[kind],lore=ENEMY_LORE[kind],known=!!SV.seenEnemies[kind];
     ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText('CREATURE LEDGER  ·  ENTRY '+(i+1)+' OF '+ENEMY_ORDER.length,W/2,y+38);
     ctx.fillStyle=known?INK:'rgba(60,48,32,.42)';ctx.font='700 30px Georgia,serif';ctx.fillText(known?lore[0]:'AN UNSEEN CREATURE',W/2,y+82);
     ctx.strokeStyle=known?K.col:INK2;ctx.beginPath();ctx.moveTo(x+70,y+103);ctx.lineTo(x+bw-70,y+103);ctx.stroke();
     if(known){
-      const img=SPR[kind][0],scale=Math.min(2.25,150/(img.height/SS));blit(img,W/2,y+270,scale,false);
+      const img=bossEntry?SPR.warden:SPR[kind][0],scale=bossEntry?Math.min(1.15,155/(img.height/SS)):Math.min(2.25,150/(img.height/SS));blit(img,W/2,y+270,scale,false);
       ctx.fillStyle=K.col;ctx.font='700 12px Georgia,serif';ctx.fillText(lore[1].toUpperCase(),W/2,y+305);
       wrap(lore[2],x+90,y+342,bw-180,19,INK,'500 14px Georgia,serif');
-      ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText('VELLUM '+K.hp+'  ·  PACE '+K.spd+'  ·  CONTACT '+K.dmg+'  ·  INK '+K.xp,W/2,y+410);
+      ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='600 11px Georgia,serif';ctx.fillText(bossEntry?'VELLUM 5200  ·  PACE 52→70  ·  TWO PHASES  ·  FOUR ATTACK FORMS':'VELLUM '+K.hp+'  ·  PACE '+K.spd+'  ·  CONTACT '+K.dmg+'  ·  INK '+K.xp,W/2,y+410);
     }else{ctx.fillStyle=INK2;ctx.font='italic 15px Georgia,serif';ctx.fillText('Meet this creature in the Orchard to cut its form into the ledger.',W/2,y+250);}
   }else{
     const c=CARDS[i],known=!!SV.seen[c.id];
