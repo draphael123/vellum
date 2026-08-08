@@ -808,7 +808,7 @@ function blankSave(){
     stash:[],
     loadout:{implement:start, mantle:null, bracers:null, talisman:null},
     runs:0, wins:0, best:0, townSeen:false, tutorialDone:false,
-    mastery:{greatsword:0,longbow:0,censer:0},lastBinding:'unbound',runHistory:[],
+    mastery:{greatsword:0,longbow:0,censer:0},inscriptions:{greatsword:'margin',longbow:'redline',censer:'bloom'},lastBinding:'unbound',runHistory:[],
     seen:{},          // bestiary pages ever inscribed
     seenEnemies:{},
     settings:{sound:true,shake:!PREFERS_REDUCED_MOTION,particles:true,contrast:false,threatCues:true},
@@ -826,6 +826,7 @@ function loadSave(){
     if(!s.seen) s.seen = {};
     if(!s.seenEnemies)s.seenEnemies={};
     s.mastery=Object.assign({greatsword:0,longbow:0,censer:0},s.mastery||{});
+    s.inscriptions=Object.assign({greatsword:'margin',longbow:'redline',censer:'bloom'},s.inscriptions||{});
     if(!Array.isArray(s.runHistory))s.runHistory=[];
     if(!BINDINGS.some(b=>b.id===s.lastBinding))s.lastBinding='unbound';
     if(typeof s.tutorialDone!=='boolean') s.tutorialDone=false;
@@ -1143,8 +1144,8 @@ function regionAt(x,y){
   if(x>180)return 'THE RED MARGIN';
   return 'THE ROOTWAYS';
 }
-function skillUnlocked(id){return !!id&&SV.wins>=(SKILLS[id]?.wins||0);}
-function activeSkillId(){const id=SV.loadout.implement?.skill||null;return skillUnlocked(id)?id:null;}
+function skillUnlocked(id){const S=SKILLS[id];return !!S&&SV.wins>=(S.wins||0)&&(SV.mastery[S.base]||0)>=(S.mastery||0);}
+function activeSkillId(){const base=SV.loadout.implement?.base,id=SV.inscriptions[base]||SV.loadout.implement?.skill||null;return skillUnlocked(id)?id:null;}
 
 function startRun(){
   G.mode='run';G.turnT=.68; G.t=0; G.frame=0;
@@ -1642,6 +1643,7 @@ function step(dt){
   if(G.mode !== 'run') { stepFx(dt); return; }
   G.t += dt;
   audioAmbience(dt);
+  for(let i=G.walls.length-1;i>=0;i--){const w=G.walls[i];if(w.temporary&&(w.life-=dt)<=0){fx(w.x,w.y,INK2,5);G.walls.splice(i,1);}}
   // Do not consume the first-run guide when a new player leaves or falls
   // before its final lesson. It becomes optional only after all four stages.
   if(G.tutorial&&!SV.tutorialDone&&G.t>=32){SV.tutorialDone=true;persist();}
@@ -1794,6 +1796,7 @@ function updateProjectiles(dt){
           if(q.hitset && q.hitset[e.id]) continue;
           (q.hitset = q.hitset||{})[e.id]=1;
           onHit(e, q.dmg, q.a);
+          if(q.pin){e.slow=Math.max(e.slow,3.5);e.vx*=.15;e.vy*=.15;floater('PINNED',e.x,e.y-24,VERD);}
           if(hasAffix('forking') && !q.forked){
             q.forked = true;
             for(const off of [-0.45,0.45]){
@@ -3223,10 +3226,14 @@ function drawBarriers(){
 /* The active skill is a positioning verb, not another item tree. Its cooldown
    is fixed and its mark uses the same carved-page language as the world. */
 const SKILLS = {
-  margin:{name:'Margin Cut',key:'Q',cd:7,col:INK,wins:0,desc:'cleave and revise the crowd outward'},
-  redline:{name:'Redline Volley',key:'Q',cd:9,col:RUBRIC,wins:1,desc:'write seven piercing lines across the page'},
-  bloom:{name:'Black Bloom',key:'Q',cd:11,col:BLUEIN,wins:2,desc:'cast three chained scorch seals over cover'},
+  margin:{name:'Margin Cut',base:'greatsword',key:'Q',cd:7,col:INK,wins:0,desc:'cleave and revise the crowd outward'},
+  gutter:{name:'Gutter Ward',base:'greatsword',key:'Q',cd:12,col:GOLD,wins:0,mastery:6,desc:'raise a breakable line of type across the aimed path'},
+  redline:{name:'Redline Volley',base:'longbow',key:'Q',cd:9,col:RUBRIC,wins:1,desc:'write seven piercing lines across the page'},
+  pinion:{name:'Pinion Script',base:'longbow',key:'Q',cd:11,col:VERD,wins:1,mastery:6,desc:'drive three heavy quills that pin a lane in place'},
+  bloom:{name:'Black Bloom',base:'censer',key:'Q',cd:11,col:BLUEIN,wins:2,desc:'cast three chained scorch seals over cover'},
+  vesper:{name:'Vesper Bell',base:'censer',key:'Q',cd:14,col:GOLD,wins:2,mastery:6,desc:'ring a defensive scorch circle and restore the ward'},
 };
+const SKILL_BY_IMPLEMENT={greatsword:['margin','gutter'],longbow:['redline','pinion'],censer:['bloom','vesper']};
 function castSkill(id){
   const p=G.player,S=SKILLS[id]; if(!p||!S||activeSkillId()!==id||(G.skills[id]||0)>0)return;
   const mw=mouseWorld(),a=angTo(p.x,p.y,mw.x,mw.y); p.face=a; G.skills[id]=S.cd;
@@ -3247,13 +3254,24 @@ function castSkill(id){
       if(w.hp<=0){G.walls.splice(i,1);G.runMats.heartwood=(G.runMats.heartwood||0)+2;floater('+2 HEARTWOOD',w.x,w.y-25,VERD);}
     }
     say('MARGIN CUT','the crowd is revised outward');
+  }else if(id==='gutter'){
+    const d=135,cx=p.x+Math.cos(a)*d,cy=p.y+Math.sin(a)*d,vertical=Math.abs(Math.cos(a))>Math.abs(Math.sin(a));
+    for(const off of [-62,0,62]){const w={kind:'type',x:cx+(vertical?0:off),y:cy+(vertical?off:0),w:vertical?24:112,h:vertical?112:24,hp:70,maxhp:70,seed:randi(24),temporary:true,life:12};G.walls.push(w);burst(w.x,w.y,38,'slam');}
+    say('GUTTER WARD','a breakable line of type divides the page');
   }else if(id==='redline'){
     for(let i=-3;i<=3;i++)G.projectiles.push({x:p.x,y:p.y,a:a+i*.075,spd:760,dmg:13*implPower(),kind:'shot',life:0,travel:0,range:980,pierce:3,forked:true,r:4,skill:true});
     G.shake=Math.max(G.shake,5);say('REDLINE VOLLEY','seven rulings cross the page');
+  }else if(id==='pinion'){
+    for(let i=-1;i<=1;i++)G.projectiles.push({x:p.x,y:p.y,a:a+i*.11,spd:820,dmg:26*implPower(),kind:'shot',life:0,travel:0,range:1050,pierce:5,forked:true,r:5,skill:true,pin:true});
+    G.shake=Math.max(G.shake,7);say('PINION SCRIPT','three heavy quills hold the lane');
   }else if(id==='bloom'){
     const d=Math.min(310,Math.hypot(mw.x-p.x,mw.y-p.y)),cx=p.x+Math.cos(a)*d,cy=p.y+Math.sin(a)*d;
     for(let i=0;i<3;i++){const q=i/3*TAU+G.t,x=cx+Math.cos(q)*72,y=cy+Math.sin(q)*72;addPool(x,y,82,5.5,true);burst(x,y,82,'lob');for(const e of G.enemies)if(dist2(x,y,e.x,e.y)<82*82)damageEnemy(e,34*implPower(),70,q);}
     say('BLACK BLOOM','three seals smoulder beyond the timber');
+  }else if(id==='vesper'){
+    addPool(p.x,p.y,138,7,true);burst(p.x,p.y,138,'lob');p.ward=true;p.wardT=0;p.hp=Math.min(p.maxhp,p.hp+12);
+    for(const e of G.enemies)if(dist2(p.x,p.y,e.x,e.y)<138*138)damageEnemy(e,30*implPower(),180,angTo(p.x,p.y,e.x,e.y));
+    say('VESPER BELL','the ward answers inside a burning circle');
   }
   sfx('skill');
 }
@@ -3531,11 +3549,9 @@ function drawForge(){
         bx += 102;
       }
       by += ROWGAP + 8;
-      const inscribed=DEFAULT_SKILL_BY_IMPLEMENT[G.craftBase],open=skillUnlocked(inscribed);
-      ctx.fillStyle=open?RUBRIC:'rgba(60,48,32,0.48)';ctx.font='600 10px Georgia,serif';
-      ctx.fillText(open?'ACTIVE INSCRIPTION  —  Q  '+SKILLS[inscribed].name.toUpperCase()
-        :'SEALED INSCRIPTION  —  '+SKILLS[inscribed].wins+' WARDEN'+(SKILLS[inscribed].wins===1?'':'S')+' REQUIRED',rx,by);
-      by+=20;
+      ctx.fillStyle=INK2;ctx.font='700 9px Georgia,serif';ctx.fillText('FIELD MASTERY  '+(SV.mastery[G.craftBase]||0)+'  ·  ALTERNATE OPENS AT 6',rx,by);by+=14;
+      bx=rx;for(const id of SKILL_BY_IMPLEMENT[G.craftBase]){const S=SKILLS[id],open=skillUnlocked(id),selected=SV.inscriptions[G.craftBase]===id,label=open?S.name:'SEALED  '+(S.mastery||S.wins);if(uiButton(bx,by,132,28,label,selected?S.col:open?INK2:'rgba(60,48,32,.30)',true)&&open){SV.inscriptions[G.craftBase]=id;persist();G.forgeMsg='INSCRIPTION SET  ·  '+S.name.toUpperCase();}bx+=138;}by+=38;
+      const inscribed=SV.inscriptions[G.craftBase]||DEFAULT_SKILL_BY_IMPLEMENT[G.craftBase],open=skillUnlocked(inscribed);ctx.fillStyle=open?SKILLS[inscribed].col:'rgba(60,48,32,0.48)';ctx.font='600 10px Georgia,serif';ctx.fillText((open?'Q  '+SKILLS[inscribed].name.toUpperCase():'SEALED INSCRIPTION')+'  ·  '+SKILLS[inscribed].desc,rx,by);by+=18;
       ctx.fillStyle=INK2;ctx.font='italic 500 10px Georgia,serif';ctx.fillText(IMPLEMENTS[G.craftBase].blurb,rx,by);by+=18;
     }
 
@@ -3589,7 +3605,7 @@ function drawForge(){
   }
 
   // dive — bottom-left, clear of the stash column
-  if(uiButton(34, H-64, Math.min(400, W*0.34), 44, 'DIVE — THE ROTTING ORCHARD', RUBRIC)) startRun();
+  if(uiButton(34, H-64, Math.min(400, W*0.34), 44, 'BIND THE NEXT DESCENT', RUBRIC)){G.binding=SV.lastBinding||'unbound';G.mode='bindings';G.turnT=.5;}
   ctx.restore();
 }
 
