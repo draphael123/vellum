@@ -49,7 +49,7 @@ const BLUEIN = '#3d4a63';
 const ZONE_TIME   = 480;    // seconds until the Orchard-Warden arrives (v0: 8 min)
 const WORLD       = 2600;   // half-extent of the field
 const MAX_ENEMIES = 420;
-const GAME_VERSION = '0.9.0';
+const GAME_VERSION = '0.10.0';
 
 /* extra tones for the print: ink is never one flat black in a real impression */
 const INK3   = '#2b241b';
@@ -871,7 +871,7 @@ const G = {
   enemies:[], projectiles:[], eprojectiles:[], gems:[], drops:[], pools:[],
   walls:[],
   corpses:[], minions:[], fx:[], floaters:[], swings:[],
-  trees:[], blots:[], landmarks:[],
+  trees:[], blots:[], landmarks:[], hazards:[],
   traits:{},              // horde traits written this run
   cards:[],               // cards taken this run
   offer:[],               // current level-up offer
@@ -901,6 +901,7 @@ const G = {
   abandonConfirm:false,
   binding:'unbound',outcome:'abandoned',practice:false,
   wanderer:null,wandererSpawned:false,redProcession:false,
+  weather:'still',wardenWeaken:null,skillPose:null,eliteIntro:null,ceremony:null,lowPulse:0,
   announced:{},
 };
 window.G = G;
@@ -918,7 +919,8 @@ let musicUnlocked=false;
 function musicTick(dt){
   const live=musicUnlocked&&SV.settings.sound,target=['run','paused','levelup'].includes(G.mode)?'orchard':'scriptorium';
   for(const [id,track] of Object.entries(MUSIC)){
-    const wanted=live?(id===target?(id==='orchard'?.13:.16):0):0;
+    const danger=G.boss&&G.boss.phase===2 ? .035 : 0,duck=(G.ceremony||(G.boss&&G.boss.transition>0)) ? .34 : 1;
+    const wanted=live?(id===target?(id==='orchard'?.13+danger:.16)*duck:0):0;
     track.volume=lerp(track.volume,wanted,Math.min(1,dt*1.5));
     if(live&&track.paused)track.play().catch(()=>{});
     if(!live&&track.volume<.002&&!track.paused)track.pause();
@@ -972,10 +974,16 @@ function sfx(id,power=1){
   else if(id==='dead'){[147,117,87].forEach((f,i)=>tone(f,.36,'triangle',.07,.72,i*.14));}
   else if(id==='ui'){tone(410,.045,'triangle',.025,1.08);}
   else if(id==='turn'){noise(.18,.07,1500);tone(118,.12,'triangle',.025,.78,.05);}
+  else if(id==='treeCrack'){noise(.32,.12*power,430);tone(72,.28,'sawtooth',.055*power,.5,.08);}
+  else if(id==='snare'){noise(.12,.07,900);tone(185,.18,'triangle',.04,.68);}
+  else if(id==='bellTree'){[165,247,330].forEach((f,i)=>tone(f,.42,'triangle',.045,1.08,i*.07));}
+  else if(id==='forgeStamp'){tone(54,.34,'square',.09,.62);noise(.24,.12,540,.06);tone(220,.28,'triangle',.035,1.2,.14);}
+  else if(id==='elite'){tone(110,.28,'sawtooth',.055,1.55);tone(165,.25,'triangle',.035,.8,.08);}
+  else if(id==='heartbeat'){tone(48,.13,'sine',.045,.72);tone(43,.1,'sine',.03,.76,.16);}
 }
 function audioAmbience(dt){
   if(!AC||!SV.settings.sound||G.mode!=='run')return;ambienceClock-=dt;if(ambienceClock>0)return;
-  ambienceClock=G.boss?2.2:rand(7,4);noise(G.boss?.18:.09,G.boss?.025:.012,G.boss?280:850);if(G.boss)tone(42,.55,'sine',.025,.9);
+  ambienceClock=G.boss?2.2:rand(6.5,3.5);const cut=G.weather==='rain'?1250:G.weather==='ash'?480:G.region==='THE BROKEN PRESS'?620:850;noise(G.boss?.18:.11,G.boss?.025:.015,cut);if(G.boss)tone(42,.55,'sine',.025,.9);else if(G.region==='THE RED MARGIN'&&Math.random()<.35)tone(185,.32,'triangle',.012,.82);
 }
 
 /* ================================================================== INPUT */
@@ -1106,12 +1114,13 @@ function implPower(){ const it = SV.loadout.implement; return it ? it.power : 1;
 
 /* ================================================================== ZONE */
 function buildOrchard(){
-  G.trees.length = 0; G.blots.length = 0; G.walls.length = 0; G.landmarks.length=0;
+  G.trees.length = 0; G.blots.length = 0; G.walls.length = 0; G.landmarks.length=0;G.hazards.length=0;
+  G.weather=pick(['still','rain','ash','harvest']);
   const reserved=[[-920,-180],[760,-720],[-520,880],[940,690],[-1180,720],[0,-1380]];
   for(let i=0;i<210;i++){
     const a = rand(TAU), d = 260 + Math.sqrt(Math.random())*(WORLD-320);
     G.trees.push({ x:Math.cos(a)*d, y:Math.sin(a)*d, s: rand(1.15,0.62),
-                   v: randi(5), flip: Math.random()<0.5 });
+                   v: randi(5), flip: Math.random()<0.5, brittle:Math.random()<.09,hp:3,fall:0 });
   }
   G.trees.sort((a,b)=>a.y-b.y);   // painter's order, fixed once
   G.trees=G.trees.filter(t=>reserved.every(([x,y])=>dist2(t.x,t.y,x,y)>145*145));
@@ -1130,13 +1139,17 @@ function buildOrchard(){
     G.walls.push({x,y,w:vertical?thick:long,h:vertical?long:thick,kind,hp:kind==='type'?90:999,maxhp:kind==='type'?90:999,seed:randi(9999)});
   }
   G.landmarks.push(
-    {kind:'press',x:-920,y:-180,name:'THE BROKEN PRESS',cd:0},
+    {kind:'press',x:-920,y:-180,name:'THE BROKEN PRESS',cd:1,tell:0},
     {kind:'folio',x:760,y:-720,name:'THE HANGING FOLIO'},
     {kind:'well',x:-520,y:880,name:'THE BLACK WELL',charge:0},
     {kind:'camp',x:940,y:690,name:'THE LAST DESK',used:false},
     {kind:'nest',x:-1180,y:720,name:'THE ROOT BROOD',opened:false},
-    {kind:'effigy',x:0,y:-1380,name:'THE WARDEN EFFIGY'}
+    {kind:'effigy',x:0,y:-1380,name:'THE WARDEN EFFIGY'},
+    {kind:'belltree',x:1420,y:-310,name:'THE TOLLING BOUGH',cd:0},
+    {kind:'belltree',x:-1470,y:-920,name:'THE HOLLOW BELL',cd:0}
   );
+  for(let i=0;i<16;i++){const a=rand(TAU),d=rand(WORLD-350,520);G.hazards.push({kind:'snare',x:Math.cos(a)*d,y:Math.sin(a)*d,r:30,armed:true,t:0});}
+  for(let i=0;i<5;i++){const a=rand(TAU),d=rand(WORLD-500,650);G.hazards.push({kind:'channel',x:Math.cos(a)*d,y:Math.sin(a)*d,w:rand(390,230),h:rand(54,34),a:rand(TAU),lit:0});}
   for(let i=0;i<G.landmarks.length;i++){
     const L=G.landmarks[i],a=Math.atan2(L.y,L.x),n=-Math.sin(a),m=Math.cos(a);
     L.marks=[{x:L.x*.56+n*(i%2?32:-26),y:L.y*.56+m*(i%2?32:-26),a,cut:i%3}];
@@ -1168,6 +1181,7 @@ function startRun(practice=false){
   G.skills={}; for(const id of Object.keys(SKILLS)) G.skills[id]=0;
   G.tutorial=!practice&&!SV.tutorialDone;
   G.region='THE RULED GROVE';G.regionT=0;G.folioT=0;
+  G.wardenWeaken=null;G.skillPose=null;G.eliteIntro=null;G.ceremony=null;G.lowPulse=0;
   G.announced={};
   G.wanderer=null;G.wandererSpawned=false;G.redProcession=false;
   G.player = makePlayer();
@@ -1175,14 +1189,15 @@ function startRun(practice=false){
   buildOrchard();
   recompute();
   G.player.hp = G.player.maxhp;
+  const opening=activeSkillId();if(opening)G.skillPose={id:opening,t:1,dur:1,a:-Math.PI/2};sfx(implement().kind==='swing'?'sweep':implement().kind==='shot'?'shot':'lob',.8);
   if(!practice){SV.runs++;persist();}
   if(practice){for(const [kind,x,y] of [['husk',230,0],['stumpguard',-230,-80],['inkspitter',0,240]]){const e=spawnEnemy(kind,x,y);if(e){e.practice=true;e.hp=e.maxhp*=5;e.spd=0;}}say('THE PROOFING YARD','aim, attack, and test Q; the proofs endlessly reprint');}
-  else say('THE ROTTING ORCHARD',G.tutorial?'move first; the implement writes by itself':undefined);
+  else say('THE ROTTING ORCHARD',G.tutorial?'move first; the implement writes by itself':({rain:'rain loosens the ink channels',ash:'ash muffles the far bells',harvest:'the red fruit draws faster bodies',still:'the page holds its breath'})[G.weather]);
 }
 function endRun(){
   if(G.practice){G.practice=false;G.mode='town';G.turnT=.62;return;}
   // materials and found gear always come home
-  const reward=binding().reward;
+  const reward=binding().reward*(G.weather==='ash'?1.15:G.weather==='harvest'?1.08:1);
   for(const k of MAT_IDS) SV.mats[k] += Math.round((G.runMats[k]||0)*reward);
   for(const it of G.runLoot) SV.stash.push(it);
   if(G.t > SV.best) SV.best = G.t;
@@ -1229,6 +1244,7 @@ function spawnRate(){
   if(G.t<2.5)return 0;
   let r = 1.6 + m*1.55 + Math.pow(m,1.7)*0.30;
   if(G.traits.swarm) r *= 1.33;
+  if(G.weather==='harvest')r*=1.1;
   return r*binding().spawn;
 }
 function pickKind(){
@@ -1289,6 +1305,7 @@ function spawnBoss(){
     x:G.player.x+Math.cos(a)*d, y:G.player.y+Math.sin(a)*d,
     r:56, hp:5200, maxhp:5200, spd:52, phase:1,
     state:'chase', st:0, tell:null, atkCd:3.2, hitT:0, slow:0, burn:0,
+    transition:0,
   };
   G.bossIntro=3.6;G.bossChapter='THE FINAL CLAUSE';
   if(!SV.seenEnemies.warden){SV.seenEnemies.warden=true;persist();}
@@ -1297,10 +1314,11 @@ function spawnBoss(){
 }
 function updateBoss(dt){
   const b = G.boss, p = G.player; if(!b) return;
+  if(b.transition>0){b.transition-=dt;b.st=0;return;}
   b.hitT = Math.max(0, b.hitT-dt);
   if(b.burn>0){ b.burn -= dt; b.hp -= 26*dt; }
   if(b.phase===1 && b.hp < b.maxhp*0.5){
-    b.phase=2; b.spd*=1.35; b.atkCd=2.1; G.shake=14;
+    b.phase=2; b.spd*=1.35; b.atkCd=2.1; b.transition=2.35;G.shake=14;
     sfx('phase');
     G.bossIntro=2.4;G.bossChapter='SECOND IMPRESSION  ·  THE THORNS REMEMBER';
   }
@@ -1314,8 +1332,8 @@ function updateBoss(dt){
     if(b.st > b.atkCd){
       b.st = 0;
       const roll = Math.random();
-      b.state = b.phase===2&&roll>.86?'cross':roll < 0.42 ? 'slam' : roll < 0.74 ? 'lash' : 'seed';
-      if(b.state==='slam') b.tell = {kind:'ring', x:p.x, y:p.y, r:150, t:0, dur:1.15};
+      b.state = b.phase===2&&roll>.86?'cross':roll < 0.42 ? 'slam' : roll < 0.74 ? 'lash' : 'seed';if(G.wardenWeaken===b.state)b.tellPenalty=.45;else b.tellPenalty=0;
+      if(b.state==='slam') b.tell = {kind:'ring', x:p.x, y:p.y, r:150, t:0, dur:1.15+(b.tellPenalty||0)};
       if(b.state==='lash') b.tell = {kind:'line', a:angTo(b.x,b.y,p.x,p.y), t:0, dur:0.95, len:520, wide:44};
       if(b.state==='seed') b.tell = {kind:'seed', t:0, dur:0.8};
       if(b.state==='cross') b.tell = {kind:'cross',x:p.x,y:p.y,t:0,dur:1.05,len:350,wide:34};
@@ -1360,7 +1378,7 @@ function updateBoss(dt){
     dropGear(b.x, b.y, 3);
     dropGear(b.x+40, b.y+20, 2);
     for(const k of MAT_IDS) G.runMats[k] += 14;
-    G.boss = null; G.outcome='victory';G.mode='victory'; SV.wins++; persist();
+    G.boss = null; G.outcome='victory';G.mode='victory';G.ceremony={kind:'victory',t:4,dur:4};SV.wins++; persist();
     sfx('victory');
     G.shake = 20;
   }
@@ -1507,6 +1525,10 @@ function killEnemy(e){
   // ---- gear
   if(Math.random() < ((e.kind==='bloat'||e.kind==='stumpguard') ? 0.045 : 0.014)) dropGear(e.x,e.y);
 
+  if(e.kind==='broodpod')burst(e.x,e.y,64,'roots');
+  else if(e.kind==='stumpguard'){G.fx.push({line:true,x1:e.x-34,y1:e.y-30,x2:e.x+28,y2:e.y+36,t:0,dur:.42,col:PARCH});sfx('treeCrack',.75);}
+  else if(e.kind==='inkspitter'){for(let q=-2;q<=2;q++)G.fx.push({line:true,x1:e.x,y1:e.y,x2:e.x+q*28,y2:e.y-55+Math.abs(q)*9,t:0,dur:.36,col:RUBRIC});}
+  else if(e.kind==='bellower')G.fx.push({ring:true,x:e.x,y:e.y,r0:6,r1:90,t:0,dur:.4,col:GOLD});
   fx(e.x,e.y, e.tint||INK, 10);
   const i = G.enemies.indexOf(e); if(i>=0) G.enemies.splice(i,1);
 }
@@ -1661,7 +1683,9 @@ function step(dt){
   G.dt = dt; G.frame++;
   musicTick(dt);
   G.turnT=Math.max(0,G.turnT-dt);
+  if(G.ceremony){G.ceremony.t-=dt;if(G.ceremony.t<=0)G.ceremony=null;}
   if(G.mode==='run'&&G.hitStop>0){G.hitStop=Math.max(0,G.hitStop-dt);stepFx(dt*.2);return;}
+  if(G.mode==='run'&&G.eliteIntro&&G.eliteIntro.t>1.15){G.eliteIntro.t-=dt;stepFx(dt*.15);return;}
   if(G.mode === 'town'){ updateTown(dt); stepFx(dt); return; }
   if(G.mode !== 'run') { stepFx(dt); return; }
   G.t += dt;
@@ -1725,6 +1749,7 @@ function step(dt){
 
   updateSwings(dt);
   updateProjectiles(dt);
+  updateEnvironment(dt);
   updateShrieks(dt);
   updateEnemies(dt);
   updateEnemyProjectiles(dt);
@@ -1740,6 +1765,8 @@ function step(dt){
   }}
   if(G.msg){ G.msg.t -= dt; if(G.msg.t<=0) G.msg=null; }
   if(G.inscribeFlash){G.inscribeFlash.t-=dt;if(G.inscribeFlash.t<=0)G.inscribeFlash=null;}
+  if(G.skillPose){G.skillPose.t-=dt;if(G.skillPose.t<=0)G.skillPose=null;}
+  if(G.eliteIntro){G.eliteIntro.t-=dt;if(G.eliteIntro.t<=0)G.eliteIntro=null;}
 
   // resolve deferred level-ups last, and never over the top of a death
   if(G.mode === 'run' && p.pendingLevels > 0){ p.pendingLevels--; offerCards(); }
@@ -1751,6 +1778,7 @@ function updateSwings(dt){
     // follow the player so the arc reads as attached to them
     s.x = G.player.x; s.y = G.player.y;
     if(s.t > 0.03 && s.t < 0.16){
+      for(let n=0;n<G.trees.length;n++){const t=G.trees[n],key='tree'+n;if(!t.brittle||s.hit[key]||dist2(s.x,s.y,t.x,t.y)>s.reach*s.reach||Math.abs(angDiff(angTo(s.x,s.y,t.x,t.y),s.a))>s.arc/2)continue;s.hit[key]=1;damageBrittleTree(t,s.skill?3:1,s.a);}
       for(const e of G.enemies){
         if(s.hit[e.id]) continue;
         const d2 = dist2(s.x,s.y,e.x,e.y);
@@ -1814,9 +1842,8 @@ function updateProjectiles(dt){
         if(G.traits.ember || G.doct.ember>=3) addPool(q.x, q.y, q.blast*0.55, 3.0, false);
         done = true;
       }
-    } else if(b.tell.kind === 'cross'){
-      ctx.globalAlpha=.16+.46*k;ctx.strokeStyle=RUBRIC;ctx.lineWidth=b.tell.wide*2;ctx.beginPath();ctx.moveTo(b.tell.x-b.tell.len,b.tell.y);ctx.lineTo(b.tell.x+b.tell.len,b.tell.y);ctx.moveTo(b.tell.x,b.tell.y-b.tell.len);ctx.lineTo(b.tell.x,b.tell.y+b.tell.len);ctx.stroke();ctx.globalAlpha=.95;ctx.lineWidth=2;ctx.strokeRect(b.tell.x-17,b.tell.y-17,34,34);
     } else {
+      const tree=G.trees.find(t=>t.brittle&&!t.fall&&dist2(q.x,q.y,t.x,t.y)<Math.pow(14*t.s+q.r,2));if(tree){damageBrittleTree(tree,1,q.a);done=true;}
       if(projectileBlocked(q.x,q.y,q.r)||projectileBlocked((q.x+ox)/2,(q.y+oy)/2,q.r)){fx(q.x,q.y,INK2,3);done=true;}
       for(const e of done?[]:G.enemies){
         const rr = e.r+q.r;
@@ -1883,7 +1910,7 @@ function updateEnemies(dt){
       if(e.burnSrc >= 0.4){ e.burnSrc = 0; damageEnemy(e, 5*implPower(), 0); if(e.dead) continue; }
     }
 
-    let spd = e.spd;
+    let spd = e.spd*(G.weather==='rain' ? .94 : G.weather==='harvest' ? 1.06 : 1);
     if(e.slow > 0){ e.slow -= dt; spd *= 0.6; }
     if(e.haste > 0){ e.haste -= dt; spd *= 1.55; }
 
@@ -2077,9 +2104,44 @@ function updatePickups(dt){
     if(L.kind==='camp'&&!L.used&&near<88*88&&p.hp<p.maxhp){L.used=true;p.hp=Math.min(p.maxhp,p.hp+Math.max(24,p.maxhp*.35));say('THE LAST DESK','a sealed ration restores the scribe');fx(L.x,L.y,GOLD2,14);}
     if(L.kind==='folio'&&!L.read&&near<105*105){L.read=true;say('THE HANGING FOLIO','the field index remains open for one minute');G.folioT=60;}
     if(L.kind==='nest'&&!L.opened&&near<150*150){L.opened=true;say('THE ROOT BROOD','something answers beneath the binding');spawnEnemy('broodpod',L.x,L.y);for(let n=0;n<4;n++){const a=n/4*TAU;spawnEnemy(n%2?'rootling':'stumpguard',L.x+Math.cos(a)*72,L.y+Math.sin(a)*72);}}
-    if(L.kind==='press'&&near<250*250){L.cd-=dt;if(L.cd<=0){L.cd=6;let hit=0;for(const e of G.enemies){if(dist2(e.x,e.y,L.x,L.y)<230*230){damageEnemy(e,28*implPower(),80);hit++;}}if(hit){sfx('impact',1.2);burst(L.x,L.y,230,'press');say('THE BROKEN PRESS','its platen falls across the clearing');}}}
-    if(L.kind==='effigy'&&!L.awake&&near<130*130){L.awake=true;p.ward=true;p.wardT=0;p.hp=Math.min(p.maxhp,p.hp+15);const e=spawnEnemy('stumpguard',L.x,L.y+95);if(e){e.elite=true;e.hp*=2;e.maxhp=e.hp;e.xp*=3;}say('THE WARDEN EFFIGY','a ward is granted; its keeper wakes');}
+    if(L.kind==='press'&&near<285*285)L.active=true;
+    if(L.kind==='belltree'&&near<88*88&&L.cd<=0){L.cd=18;sfx('bellTree');G.fx.push({ring:true,x:L.x,y:L.y,r0:10,r1:320,t:0,dur:.7,col:GOLD});for(const e of G.enemies)if(dist2(e.x,e.y,L.x,L.y)<320*320){e.slow=Math.max(e.slow,1.5);e.windup=0;}for(let n=0;n<5;n++){const a=n/5*TAU;spawnEnemy(n%2?'needlekin':'husk',L.x+Math.cos(a)*380,L.y+Math.sin(a)*380);}say(L.name,'the toll interrupts the horde, then calls another verse');}
+    if(L.kind==='effigy'&&!L.awake&&near<130*130){L.awake=true;p.ward=true;p.wardT=0;p.hp=Math.min(p.maxhp,p.hp+15);G.wardenWeaken='slam';const e=spawnEnemy('stumpguard',L.x,L.y+95);if(e){e.elite=true;e.hp*=2;e.maxhp=e.hp;e.xp*=3;G.eliteIntro={kind:e.kind,name:'THE EFFIGY KEEPER',t:1.4};}say('THE WARDEN EFFIGY','the Platen Fall slows; its keeper wakes');sfx('elite');}
   }
+}
+
+function damageBrittleTree(t,amount,a){
+  if(!t||!t.brittle||t.fall)return;t.hp-=amount;fx(t.x,t.y,INK2,3);
+  if(t.hp>0)return;t.fall=.9;t.fa=a;sfx('treeCrack');say('A BRITTLE DEADFALL','the trunk will write a temporary wall');
+}
+function updateEnvironment(dt){
+  const p=G.player;
+  if(!G.practice&&!G.announced.tornMargin&&G.t>=330){G.announced.tornMargin=true;for(const off of [-1,0,1])G.hazards.push({kind:'tear',x:p.x+off*260+rand(70,-70),y:p.y+(off%2?190:-220),w:190,h:110,tell:2.2,life:13});say('THE MARGIN UNBINDS','leave the blue crosshatch before the page tears away');sfx('turn');}
+  for(const L of G.landmarks){
+    if(L.cd>0)L.cd-=dt;
+    if(L.kind==='press'&&L.active){
+      if(L.tell>0){L.tell-=dt;if(L.tell<=0){let hit=0;for(const e of G.enemies)if(Math.abs(e.x-L.x)<105&&Math.abs(e.y-L.y)<72){damageEnemy(e,85,210);hit++;}if(Math.abs(p.x-L.x)<105&&Math.abs(p.y-L.y)<72)hurtPlayer(30,'press');sfx('platen',1.4);burst(L.x,L.y,120,'press');G.shake=15;L.cd=7;L.active=false;}}
+      else if(L.cd<=0){L.tell=1.15;sfx('marginTell');say('THE PLATEN DESCENDS','lead the horde beneath the red proof');}
+    }
+  }
+  for(const t of G.trees){
+    if(t.fall>0){t.fall-=dt;if(t.fall<=0){const vertical=Math.abs(Math.cos(t.fa))<.7;G.walls.push({x:t.x+Math.cos(t.fa)*60,y:t.y+Math.sin(t.fa)*60,w:vertical?28:160,h:vertical?160:28,kind:'deadfall',hp:999,maxhp:999,temporary:true,life:18,seed:t.v});for(const e of G.enemies)if(dist2(e.x,e.y,t.x,t.y)<170*170)damageEnemy(e,70,260,t.fa);if(dist2(p.x,p.y,t.x,t.y)<125*125)hurtPlayer(18,'deadfall');t.gone=true;burst(t.x,t.y,100,'slam');}}
+  }
+  G.trees=G.trees.filter(t=>!t.gone);
+  for(const h of G.hazards){
+    if(h.kind==='tear'){h.tell=Math.max(0,h.tell-dt);if(h.tell<=0){h.life-=dt;if(Math.abs(p.x-h.x)<h.w/2&&Math.abs(p.y-h.y)<h.h/2)hurtPlayer(5*dt,'torn margin');for(const e of G.enemies)if(Math.abs(e.x-h.x)<h.w/2&&Math.abs(e.y-h.y)<h.h/2)damageEnemy(e,18*dt,0);}continue;}
+    if(h.kind==='snare'){
+      if(h.t>0)h.t-=dt;if(!h.armed&&h.t<=0)h.armed=true;
+      if(h.armed){let victim=null;if(dist2(p.x,p.y,h.x,h.y)<h.r*h.r)victim=p;else victim=G.enemies.find(e=>dist2(e.x,e.y,h.x,h.y)<h.r*h.r);if(victim){h.armed=false;h.t=9;victim.slow=Math.max(victim.slow||0,2.4);victim.vx=victim.vy=0;sfx('snare');floater('ROOT-BOUND',victim.x,victim.y-24,VERD);}}
+    }else{
+      h.lit=Math.max(0,h.lit-dt);for(const q of G.pools)if(dist2(q.x,q.y,h.x,h.y)<Math.pow(q.r+h.w*.35,2))h.lit=3;
+      const ca=Math.cos(-h.a),sa=Math.sin(-h.a),inside=o=>{const dx=o.x-h.x,dy=o.y-h.y,x=dx*ca-dy*sa,y=dx*sa+dy*ca;return Math.abs(x)<h.w/2&&Math.abs(y)<h.h/2;};
+      if(inside(p)){p.x-=Math.cos(p.face)*18*dt;if(h.lit>0)hurtPlayer(2.5*dt,'scorch');}
+      for(const e of G.enemies)if(inside(e)){e.slow=Math.max(e.slow,.12);if(h.lit>0)damageEnemy(e,10*dt,0);}
+    }
+  }
+  G.hazards=G.hazards.filter(h=>h.kind!=='tear'||h.life>0);
+  if(p.hp/p.maxhp<.25){G.lowPulse-=dt;if(G.lowPulse<=0){G.lowPulse=1.25;sfx('heartbeat');}}else G.lowPulse=0;
 }
 
 function stepFx(dt){
@@ -2114,6 +2176,7 @@ function draw(){
   ctx.translate(W/2 - G.cam.x + sx, H/2 - G.cam.y + sy);
 
   drawGround();
+  drawHazards();
   drawWaymarks();
   drawLandmarks();
   drawBarriers();
@@ -2220,8 +2283,10 @@ function drawTrees(){
     ctx.fillStyle='rgba(48,36,20,0.09)';
     ctx.beginPath(); ctx.ellipse(t.x+4, t.y+3, 22*s, 7*s, 0, 0, TAU); ctx.fill();
     ctx.translate(t.x, t.y);
+    if(t.fall>0){const k=1-t.fall/.9;ctx.rotate((t.fa||0)+Math.PI/2);ctx.scale(1,Math.max(.14,1-k*.86));}
     if(t.flip) ctx.scale(-1,1);
     ctx.drawImage(img, -w/2, -h + 14*s, w, h);
+    if(t.brittle&&!t.fall){ctx.strokeStyle=RUBRIC;ctx.globalAlpha=.65;ctx.lineWidth=1.6;ctx.beginPath();ctx.moveTo(-5,-20*s);ctx.lineTo(3,-11*s);ctx.lineTo(-2,-3*s);ctx.stroke();}
     ctx.restore();
   }
 }
@@ -2388,6 +2453,7 @@ function drawMinions(){
 function drawBoss(){
   const b = G.boss;
   ctx.save();
+  if(b.transition>0){const k=1-b.transition/2.35;ctx.strokeStyle=RUBRIC;ctx.globalAlpha=.25+.65*Math.sin(k*Math.PI);ctx.lineWidth=3;for(let i=0;i<4;i++){ctx.beginPath();ctx.arc(b.x,b.y,75+i*28+k*45,0,TAU);ctx.stroke();}ctx.fillStyle=INK;for(let i=-3;i<=3;i++){const y=b.y+i*15;ctx.fillRect(b.x-105-k*35,y,210+k*70,3);}ctx.globalAlpha=1;}
   // telegraphs first, under the body
   if(b.tell){
     const k = b.tell.t/b.tell.dur;
@@ -2400,6 +2466,8 @@ function drawBoss(){
       const dx=Math.cos(b.tell.a), dy=Math.sin(b.tell.a);
       ctx.globalAlpha=0.18+0.45*k; ctx.strokeStyle=RUBRIC; ctx.lineWidth=b.tell.wide*2;
       ctx.beginPath(); ctx.moveTo(b.x,b.y); ctx.lineTo(b.x+dx*b.tell.len,b.y+dy*b.tell.len); ctx.stroke();
+    } else if(b.tell.kind === 'cross'){
+      ctx.globalAlpha=.16+.46*k;ctx.strokeStyle=RUBRIC;ctx.lineWidth=b.tell.wide*2;ctx.beginPath();ctx.moveTo(b.tell.x-b.tell.len,b.tell.y);ctx.lineTo(b.tell.x+b.tell.len,b.tell.y);ctx.moveTo(b.tell.x,b.tell.y-b.tell.len);ctx.lineTo(b.tell.x,b.tell.y+b.tell.len);ctx.stroke();ctx.globalAlpha=.95;ctx.lineWidth=2;ctx.strokeRect(b.tell.x-17,b.tell.y-17,34,34);
     } else {
       ctx.globalAlpha=0.3+0.3*k; ctx.strokeStyle=VERD; ctx.lineWidth=4;
       ctx.beginPath(); ctx.arc(b.x,b.y,b.r+30*k,0,TAU); ctx.stroke();
@@ -2413,7 +2481,7 @@ function drawBoss(){
   const breathe = 1 + Math.sin(G.t*(b.phase===2?3.4:2.0))*0.022;
   const roll = Math.sin(G.t*(b.phase===2?4.2:2.6))*0.028;
   ctx.save();
-  ctx.translate(b.x, b.y); ctx.rotate(roll); ctx.scale(breathe, breathe);
+  ctx.translate(b.x, b.y); ctx.rotate(roll);ctx.scale(breathe, b.transition>0?breathe*(.72+.28*Math.abs(Math.cos((1-b.transition/2.35)*Math.PI))):breathe);
   if(G.player.x < b.x) ctx.scale(-1,1);
   const img = hurt ? SPRF.warden : SPR.warden;
   const w = img.width/SS*(b.r/56), h = img.height/SS*(b.r/56);
@@ -2456,6 +2524,8 @@ function drawPlayer(){
   if(ART_READY && back) drawImplement(p, a);
   if(ART_READY) blit((p.hurtT > 0.24 ? SPRF : SPR).scribe[f], p.x, p.y, 1, Math.cos(a) < 0);
   if(ART_READY && !back) drawImplement(p, a);
+
+  if(G.skillPose){const S=SKILLS[G.skillPose.id],k=clamp(G.skillPose.t/G.skillPose.dur,0,1),r=34+(1-k)*54;ctx.save();ctx.translate(p.x,p.y-3);ctx.rotate(G.skillPose.a);ctx.globalAlpha=Math.sin((1-k)*Math.PI);ctx.strokeStyle=S.col;ctx.lineWidth=2.5;ctx.beginPath();if(['margin','gutter'].includes(G.skillPose.id)){ctx.arc(0,0,r,-1.15,1.15);}else if(['redline','pinion'].includes(G.skillPose.id)){for(let i=-2;i<=2;i++){ctx.moveTo(5,i*7);ctx.lineTo(r,i*12);}}else{ctx.arc(0,0,r*.65,0,TAU);ctx.moveTo(r*.3,0);ctx.arc(0,0,r,0,TAU);}ctx.stroke();ctx.restore();}
 
   if(p.ward){
     ctx.save();
@@ -2668,6 +2738,8 @@ function drawVignette(){
     const a=clamp(G.player.hurtT/0.42,0,1)*0.34;ctx.save();ctx.strokeStyle=`rgba(164,36,59,${a})`;ctx.lineWidth=18;
     ctx.strokeRect(3,3,W-6,H-6);ctx.restore();
   }
+  if(G.player&&G.player.hp/G.player.maxhp<.25){const pulse=.12+.10*Math.sin(G.t*5);ctx.save();ctx.strokeStyle=`rgba(164,36,59,${pulse})`;ctx.lineWidth=32;ctx.strokeRect(4,4,W-8,H-8);ctx.restore();}
+  if(G.mode==='run'&&(G.weather==='rain'||G.weather==='ash')){ctx.save();ctx.globalAlpha=G.weather==='rain' ? .12 : .09;ctx.strokeStyle=G.weather==='rain'?BLUEIN:INK2;ctx.fillStyle=INK2;for(let i=0;i<34;i++){const x=(i*83+G.t*(G.weather==='rain'?75:18))%(W+80)-40,y=(i*47+G.t*(G.weather==='rain'?150:22))%(H+80)-40;if(G.weather==='rain'){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-8,y+20);ctx.stroke();}else{ctx.beginPath();ctx.arc(x,y,1.5+(i%3),0,TAU);ctx.fill();}}ctx.restore();}
 }
 /* Laid over everything, including the UI, so the whole frame reads as one
    printed sheet rather than shapes floating above a texture. */
@@ -2804,12 +2876,13 @@ function drawHud(){
     ctx.fillStyle=PARCH2;ctx.fillRect(0,H*.41,W,102);ctx.fillStyle=RUBRIC;ctx.fillRect(0,H*.41,Math.min(W,W*(1-G.bossIntro/3.6)),3);ctx.fillRect(W-Math.min(W,W*(1-G.bossIntro/3.6)),H*.41+99,Math.min(W,W*(1-G.bossIntro/3.6)),3);
     ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 11px Georgia,serif';ctx.fillText(G.bossChapter,W/2,H*.41+30);ctx.font='700 31px Georgia,serif';ctx.fillText('THE ORCHARD-WARDEN',W/2,H*.41+65);ctx.fillStyle=RUBRIC;ctx.font='italic 12px Georgia,serif';ctx.fillText('the page has appointed its final authority',W/2,H*.41+87);ctx.restore();
   }
+  if(G.eliteIntro){const k=clamp(G.eliteIntro.t/1.5,0,1);ctx.save();ctx.globalAlpha=Math.min(1,k*2);ctx.fillStyle='rgba(230,217,184,.91)';ctx.fillRect(W/2-225,H*.19-25,450,62);ctx.strokeStyle=GOLD;ctx.lineWidth=2;ctx.strokeRect(W/2-219,H*.19-19,438,50);ctx.textAlign='center';ctx.fillStyle=RUBRIC;ctx.font='700 10px Georgia,serif';ctx.fillText('GILDED AUTHORITY',W/2,H*.19);ctx.fillStyle=INK;ctx.font='700 21px Georgia,serif';ctx.fillText(G.eliteIntro.name,W/2,H*.19+24);ctx.restore();}
   if(G.tutorial && G.mode==='run' && G.t<32){
     const phase=G.t<8?0:G.t<16?1:G.t<25?2:3;
     const lines=[
       ['MOVE THE SCRIBE','WASD moves. Aim with the mouse; your implement writes by itself.'],
       ['MAKE SPACE',activeSkillId()?'Press Q for '+SKILLS[activeSkillId()].name+' — '+SKILLS[activeSkillId()].desc+'.':'This implement’s inscription is still sealed. Defeat Wardens to open it.'],
-      ['USE THE PAGE','Trees, roots, and presses block attacks. Lead one enemy group away from another.'],
+      ['USE THE PAGE','Crack marked trees, bait the red press, and turn pursuers through root snares.'],
       ['WRITE THE HORDE','At level-up, every gift also gives the enemy a trait—and opens its material.'],
     ][phase];
     const bw=Math.min(520,W-40),bx=W/2-bw/2,by=72;
@@ -2833,6 +2906,7 @@ function drawLandmarks(){
     ctx.fillStyle='rgba(48,36,20,.11)';ctx.beginPath();ctx.ellipse(5,45,62,12,0,0,TAU);ctx.fill();ctx.fillStyle=INK3;
     if(L.kind==='press'){
       // A warped field press: timber frame, screw, platen, and a torn proof.
+      if(L.tell>0){const k=1-L.tell/1.15;ctx.fillStyle='rgba(164,36,59,'+(.08+k*.18)+')';ctx.fillRect(-105,-72,210,144);ctx.strokeStyle=RUBRIC;ctx.lineWidth=2+2*k;ctx.strokeRect(-105,-72,210,144);ctx.fillStyle=RUBRIC;ctx.globalAlpha=.55;for(let x=-88;x<90;x+=18)ctx.fillRect(x,-65,2,130);ctx.globalAlpha=1;}
       ctx.fillRect(-55,-48,10,91);ctx.fillRect(45,-48,10,91);ctx.fillRect(-62,-51,124,9);ctx.fillRect(-67,39,134,10);
       ctx.strokeStyle=RUBRIC;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,-72);ctx.lineTo(0,13);ctx.moveTo(-24,-66);ctx.lineTo(24,-66);ctx.stroke();
       ctx.fillStyle=PARCH2;ctx.fillRect(-35,1,70,31);ctx.strokeStyle=INK;ctx.strokeRect(-35,1,70,31);ctx.strokeStyle=INK2;ctx.lineWidth=1;for(let y=8;y<28;y+=6){ctx.beginPath();ctx.moveTo(-27,y);ctx.lineTo(23+(y%4)*2,y);ctx.stroke();}
@@ -2855,6 +2929,9 @@ function drawLandmarks(){
       ctx.strokeStyle=INK3;for(let i=0;i<11;i++){const a=i/11*TAU,r=35+(i%3)*7;ctx.lineWidth=3+(i%2);ctx.beginPath();ctx.moveTo(Math.cos(a)*8,Math.sin(a)*5);ctx.quadraticCurveTo(Math.cos(a+.6)*r*.6,Math.sin(a+.6)*r*.6,Math.cos(a)*r,Math.sin(a)*r*.62+8);ctx.stroke();}
       ctx.fillStyle=L.opened?RUBRIC:INK;ctx.beginPath();ctx.ellipse(0,8,L.opened?20:11,L.opened?13:7,0,0,TAU);ctx.fill();
       if(!L.opened){ctx.strokeStyle=PARCH3;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-4,4);ctx.lineTo(4,12);ctx.moveTo(4,4);ctx.lineTo(-4,12);ctx.stroke();}
+    }else if(L.kind==='belltree'){
+      ctx.strokeStyle=INK3;ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(0,46);ctx.quadraticCurveTo(-8,-8,3,-54);ctx.moveTo(0,-24);ctx.quadraticCurveTo(-36,-45,-58,-31);ctx.moveTo(2,-31);ctx.quadraticCurveTo(38,-57,62,-39);ctx.stroke();
+      for(const x of [-42,-18,18,45]){ctx.strokeStyle=INK2;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(x,-37-Math.abs(x)*.12);ctx.lineTo(x,-13-Math.abs(x)*.08);ctx.stroke();ctx.fillStyle=L.cd>0?INK2:GOLD;ctx.beginPath();ctx.moveTo(x-6,-13-Math.abs(x)*.08);ctx.lineTo(x+6,-13-Math.abs(x)*.08);ctx.lineTo(x+4,-1-Math.abs(x)*.04);ctx.lineTo(x-4,-1-Math.abs(x)*.04);ctx.closePath();ctx.fill();}
     }else{
       // Bound branches form a recognisable orchard warden, never a UI cross.
       ctx.strokeStyle=INK3;ctx.lineWidth=7;ctx.beginPath();ctx.moveTo(0,47);ctx.quadraticCurveTo(-5,-7,0,-41);ctx.moveTo(-3,-20);ctx.lineTo(-40,-45);ctx.moveTo(3,-20);ctx.lineTo(42,-47);ctx.stroke();
@@ -3111,6 +3188,8 @@ function drawEnd(won){
     ctx.fillStyle=PARCH3;ctx.font='italic 11px Georgia,serif';ctx.fillText(advice,W/2,H-86);
   }
 
+  if(won&&G.ceremony?.kind==='victory'){const k=1-G.ceremony.t/G.ceremony.dur,rr=34+k*72;ctx.save();ctx.translate(W/2,H*.26+96);ctx.rotate(k*.08);ctx.globalAlpha=Math.min(1,k*2);ctx.strokeStyle=RUBRIC;ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,0,rr,0,TAU*k);ctx.stroke();ctx.strokeStyle=INK;ctx.lineWidth=2;for(let i=0;i<12;i++){const a=i/12*TAU;if(a>TAU*k)break;ctx.beginPath();ctx.moveTo(Math.cos(a)*26,Math.sin(a)*26);ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr);ctx.stroke();}ctx.fillStyle=INK;ctx.textAlign='center';ctx.font='700 10px Georgia,serif';ctx.fillText(k>.72?'ENTERED IN THE BESTIARY':'THE BINDER WRITES...',0,4);ctx.restore();}
+
   ctx.font='600 13px Georgia, serif'; ctx.fillStyle = won?RUBRIC:GOLD;
   ctx.fillText('press SPACE to return to the Scriptorium', W/2, H-56);
   ctx.restore();
@@ -3215,7 +3294,7 @@ function drawBindings(){
     else{wrap(B.desc,x+26,y+150,cw-52,18,INK2,'500 13px Georgia,serif');const laws=B.law.split('  ·  ');ctx.fillStyle=B.col;ctx.font='700 9px Georgia,serif';ctx.fillText(laws[0].toUpperCase(),x+cw/2,y+242);if(laws[1])ctx.fillText(laws[1].toUpperCase(),x+cw/2,y+258);ctx.fillStyle=INK2;ctx.font='italic 10px Georgia,serif';ctx.fillText('MATERIAL IMPRESSION  ×'+B.reward.toFixed(2),x+cw/2,y+288);}
     if(hov&&mouse.clicked){G.binding=B.id;SV.lastBinding=B.id;persist();startRun();}
   }
-  if(!G.practice&&!G.redProcession&&G.t>=255){G.redProcession=true;const p=G.player,a=rand(TAU),cx=p.x+Math.cos(a)*Math.max(W,H)*.5,cy=p.y+Math.sin(a)*Math.max(W,H)*.5;for(let i=0;i<7;i++){const q=(i-3)*34,e=spawnEnemy(i%3===0?'bellower':i%2?'stumpguard':'needlekin',cx+Math.cos(a+Math.PI/2)*q,cy+Math.sin(a+Math.PI/2)*q);if(e){e.elite=true;e.hp*=1.65;e.maxhp=e.hp;e.dmg*=1.2;e.xp*=2;}}say('THE RUBRIC PROCESSION','gilded authorities carry a richer impression');sfx('bell');}
+  if(!G.practice&&!G.redProcession&&G.t>=255){G.redProcession=true;const p=G.player,a=rand(TAU),cx=p.x+Math.cos(a)*Math.max(W,H)*.5,cy=p.y+Math.sin(a)*Math.max(W,H)*.5;for(let i=0;i<7;i++){const q=(i-3)*34,e=spawnEnemy(i%3===0?'bellower':i%2?'stumpguard':'needlekin',cx+Math.cos(a+Math.PI/2)*q,cy+Math.sin(a+Math.PI/2)*q);if(e){e.elite=true;e.hp*=1.65;e.maxhp=e.hp;e.dmg*=1.2;e.xp*=2;}}G.eliteIntro={name:'THE RUBRIC PROCESSION',t:1.5};say('THE RUBRIC PROCESSION','gilded authorities carry a richer impression');sfx('elite');}
   if(uiButton(W/2-80,H-64,160,32,'RETURN TO TOWN',INK2,true)){G.mode='town';G.turnT=.46;}
   ctx.textAlign='center';ctx.fillStyle=INK2;ctx.font='500 10px Georgia,serif';ctx.fillText('Esc returns  ·  bindings alter pressure and material yield, never permanent stats',W/2,H-20);ctx.restore();
 }
@@ -3274,7 +3353,7 @@ const SKILLS = {
 const SKILL_BY_IMPLEMENT={greatsword:['margin','gutter'],longbow:['redline','pinion'],censer:['bloom','vesper']};
 function castSkill(id){
   const p=G.player,S=SKILLS[id]; if(!p||!S||activeSkillId()!==id||(G.skills[id]||0)>0)return;
-  const mw=mouseWorld(),a=angTo(p.x,p.y,mw.x,mw.y); p.face=a; G.skills[id]=S.cd;
+  const mw=mouseWorld(),a=angTo(p.x,p.y,mw.x,mw.y); p.face=a; G.skills[id]=S.cd;G.skillPose={id,t:.55,dur:.55,a};
   if(id==='margin'){
     const reach=175,arc=2.15;
     G.swings.push({x:p.x,y:p.y,a,arc,reach,t:0,dur:0.32,dmg:18*implPower(),hit:{},skill:true});
@@ -3311,7 +3390,10 @@ function castSkill(id){
     for(const e of G.enemies)if(dist2(p.x,p.y,e.x,e.y)<138*138)damageEnemy(e,30*implPower(),180,angTo(p.x,p.y,e.x,e.y));
     say('VESPER BELL','the ward answers inside a burning circle');
   }
-  sfx('skill');
+  sfx(id==='vesper'?'bellTree':id==='redline'||id==='pinion'?'quill':id==='margin'||id==='gutter'?'sweep':'skill',1.15);
+}
+function drawHazards(){
+  for(const h of G.hazards){ctx.save();ctx.translate(h.x,h.y);if(h.kind==='tear'){const active=h.tell<=0;ctx.fillStyle=active?'rgba(28,23,18,.42)':'rgba(61,74,99,.10)';ctx.fillRect(-h.w/2,-h.h/2,h.w,h.h);ctx.strokeStyle=active?INK:BLUEIN;ctx.lineWidth=active?5:2;ctx.setLineDash(active?[]:[9,7]);ctx.strokeRect(-h.w/2,-h.h/2,h.w,h.h);ctx.setLineDash([]);if(!active){ctx.globalAlpha=.45;for(let x=-h.w/2;x<h.w/2;x+=18){ctx.beginPath();ctx.moveTo(x,-h.h/2);ctx.lineTo(x+36,h.h/2);ctx.stroke();}}}else if(h.kind==='channel'){ctx.rotate(h.a);ctx.fillStyle=h.lit>0?'rgba(164,36,59,.18)':'rgba(61,74,99,.10)';ctx.fillRect(-h.w/2,-h.h/2,h.w,h.h);ctx.strokeStyle=h.lit>0?RUBRIC:BLUEIN;ctx.globalAlpha=.55;ctx.lineWidth=1.5;for(let y=-h.h/2+7;y<h.h/2;y+=9){ctx.beginPath();ctx.moveTo(-h.w/2,y);ctx.bezierCurveTo(-h.w*.15,y-5,h.w*.15,y+5,h.w/2,y);ctx.stroke();}if(h.lit>0){ctx.fillStyle=GOLD2;for(let x=-h.w/2+20;x<h.w/2;x+=38){ctx.beginPath();ctx.arc(x,Math.sin(x)*7,2+Math.sin(G.t*8+x)*1.2,0,TAU);ctx.fill();}}}else{ctx.strokeStyle=h.armed?VERD:'rgba(93,107,58,.25)';ctx.lineWidth=2;ctx.globalAlpha=h.armed?.7:.35;for(let i=0;i<7;i++){const a=i/7*TAU,r=h.r*(.55+(i%2)*.3);ctx.beginPath();ctx.moveTo(0,0);ctx.quadraticCurveTo(Math.cos(a+.5)*r*.7,Math.sin(a+.5)*r*.7,Math.cos(a)*r,Math.sin(a)*r);ctx.stroke();}ctx.fillStyle=h.armed?INK2:PARCH3;ctx.beginPath();ctx.arc(0,0,4,0,TAU);ctx.fill();}ctx.restore();}
 }
 function resolveCircleBody(o,r,cx,cy,cr){
   const dx=o.x-cx,dy=o.y-cy,min=r+cr,d=Math.hypot(dx,dy);
@@ -3614,7 +3696,7 @@ function drawForge(){
       const can = SV.mats[mat] >= cost;
       if(uiButton(bx, by, 108, 34, RARITY[r].name+'  '+cost, can?RARITY[r].col:'rgba(60,48,32,0.35)') && can){
         SV.mats[mat] -= cost;
-        const made=makeItem(G.craftSlot, r, G.craftKw, G.craftBase);SV.stash.push(made);G.forgeMsg='INSCRIBED  ·  '+made.name.toUpperCase();
+        const made=makeItem(G.craftSlot, r, G.craftKw, G.craftBase);SV.stash.push(made);G.forgeMsg='INSCRIBED  ·  '+made.name.toUpperCase();G.ceremony={kind:'forge',t:1.25,dur:1.25,name:made.name};sfx('forgeStamp');
         persist();
       }
       bx += 114;
@@ -3653,6 +3735,7 @@ function drawForge(){
 
   // dive — bottom-left, clear of the stash column
   if(uiButton(34, H-64, Math.min(400, W*0.34), 44, 'BIND THE NEXT DESCENT', RUBRIC)){G.binding=SV.lastBinding||'unbound';G.mode='bindings';G.turnT=.5;}
+  if(G.ceremony?.kind==='forge'){const k=clamp(G.ceremony.t/G.ceremony.dur,0,1),slam=Math.min(1,(1-k)*5);ctx.save();ctx.globalAlpha=Math.sin((1-k)*Math.PI);ctx.translate(W/2,H/2-40+Math.pow(1-slam,2)*-100);ctx.rotate(-.025);ctx.fillStyle=PARCH4;ctx.fillRect(-170,-56,340,112);ctx.strokeStyle=RUBRIC;ctx.lineWidth=5;ctx.strokeRect(-164,-50,328,100);ctx.textAlign='center';ctx.fillStyle=INK;ctx.font='700 11px Georgia,serif';ctx.fillText('THE PLATEN HAS SPOKEN',0,-12);ctx.font='700 22px Georgia,serif';ctx.fillText(G.ceremony.name.toUpperCase(),0,20);ctx.restore();}
   ctx.restore();
 }
 
