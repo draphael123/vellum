@@ -151,9 +151,10 @@ were structural rather than numerical, and are worth knowing:
 - The Orchard is one mechanical zone with six visual districts, six authored
   interactive landmarks, rotating formation waves, and rare gilded elites. This creates
   exploration and encounter diversity without adding a second material line.
-- The Bestiary building now opens a twelve-page archive. Pages remain veiled
-  until selected during a run, then preserve their gift, curse, material, and
-  Forge relationship for later reference.
+- The Bestiary building now opens paired manuscript and creature ledgers.
+  Twelve pages remain veiled until selected, then preserve their gift, curse,
+  material, and Forge relationship. Nine creature entries record silhouettes,
+  combat roles, and base field statistics after the species is encountered.
 - Persistent reading options cover impact shake, particle density, contrast,
   and role-based threat cues. The first-run guide can be replayed there.
 - Fallen timber, exposed roots, and destructible letterpress type replace the
