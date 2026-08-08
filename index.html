@@ -1647,7 +1647,7 @@ function updateSwings(dt){
       if(G.boss && !s.hit.boss){
         const b=G.boss, rr=s.reach+b.r;
         if(dist2(s.x,s.y,b.x,b.y) <= rr*rr && Math.abs(angDiff(angTo(s.x,s.y,b.x,b.y), s.a)) <= s.arc/2){
-          s.hit.boss=1; b.hp -= s.dmg; b.hitT=0.1; floater(Math.round(s.dmg), b.x, b.y-b.r, PARCH);
+          s.hit.boss=1; b.hp -= s.dmg; b.hitT=0.1;sfx('hit',clamp(s.dmg/30,.45,1.2)); floater(Math.round(s.dmg), b.x, b.y-b.r, PARCH);
         }
       }
     }
@@ -1688,7 +1688,7 @@ function updateProjectiles(dt){
           if(dist2(q.x,q.y,e.x,e.y) < q.blast*q.blast) onHit(e, q.dmg, angTo(q.x,q.y,e.x,e.y));
         }
         if(G.boss && dist2(q.x,q.y,G.boss.x,G.boss.y) < (q.blast+G.boss.r)*(q.blast+G.boss.r)){
-          G.boss.hp -= q.dmg; G.boss.hitT=0.1;
+          G.boss.hp -= q.dmg; G.boss.hitT=0.1;sfx('hit',clamp(q.dmg/30,.45,1.2));
         }
         if(G.traits.ember || G.doct.ember>=3) addPool(q.x, q.y, q.blast*0.55, 3.0, false);
         done = true;
@@ -1715,7 +1715,7 @@ function updateProjectiles(dt){
       if(!done && G.boss){
         const rr = G.boss.r+q.r;
         if(dist2(q.x,q.y,G.boss.x,G.boss.y) < rr*rr){
-          G.boss.hp -= q.dmg; G.boss.hitT=0.1;
+          G.boss.hp -= q.dmg; G.boss.hitT=0.1;sfx('hit',clamp(q.dmg/30,.45,1.2));
           floater(Math.round(q.dmg), q.x, q.y, PARCH);
           if(q.pierce>0) q.pierce--; else done = true;
         }
