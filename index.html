@@ -2,8 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>VELLUM</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Write the bestiary hunting you in VELLUM, a hand-drawn browser action game set inside a living manuscript.">
+<meta name="theme-color" content="#20180f">
+<meta name="application-name" content="VELLUM">
+<meta property="og:title" content="VELLUM — the bestiary you are standing in">
+<meta property="og:description" content="Choose pages, write laws into the horde, forge a build, and finish the Orchard-Warden's final clause.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://vellum-five-gules.vercel.app/">
+<meta name="twitter:card" content="summary">
+<title>VELLUM — The Living Bestiary</title>
 <style>
   html,body{margin:0;padding:0;height:100%;background:#20180f;overflow:hidden;
     font-family:Georgia,'Iowan Old Style','Palatino Linotype',serif;}
@@ -13,7 +21,7 @@
 </style>
 </head>
 <body>
-<canvas id="c"></canvas>
+<canvas id="c" role="application" aria-label="VELLUM, a manuscript action game. Use the on-screen first-run guide or press O for reading conditions."></canvas>
 <div id="hint">WASD move &nbsp;·&nbsp; E interact &nbsp;·&nbsp; mouse aim &nbsp;·&nbsp; Q skill &nbsp;·&nbsp; F equip &nbsp;·&nbsp; Esc pause</div>
 <script>
 "use strict";
