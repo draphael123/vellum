@@ -101,7 +101,8 @@ twelve manuscript pages remained reachable, rotating formations continued past
 400 kills, projectile cover stayed active, and cleanup kept the active pools
 bounded. This is systems verification, not a substitute for a balance playtest.
 
-The subsequent game-feel pass repeated the smoke through 8:12 with all twelve
+The subsequent game-feel pass most recently repeated the smoke through 8:07
+after the specialist line-of-sight, hit-stop, and audio work, with all twelve
 pages, all ten species, the Warden's second phase and victory transition. It
 also asserted the three weapon inscriptions independently: one Margin Cut
 sweep, seven Redline projectiles, and three Black Bloom seals. No runtime error
