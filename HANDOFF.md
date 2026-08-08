@@ -180,6 +180,8 @@ were structural rather than numerical, and are worth knowing:
   impacts, rubric tones, and Warden drones; there are no external samples.
 - Page Motion also governs page-turn transitions, defaults off when a device
   requests reduced motion, and focus loss safely pauses the run and releases input.
+- The pause page has a two-step End Run action; recovered goods are banked through
+  the same path as victory and defeat, so players never need to reload to leave.
 - Touch play uses a left drag for movement, right drag for aiming, the active
   inscription plate as its skill button, and explicit Return/Continue controls
   throughout town screens. Found gear also has a clickable take action.

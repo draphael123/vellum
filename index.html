@@ -884,6 +884,7 @@ const G = {
   turnT:0,
   turnSound:false,
   returnMode:'menu', archivePage:0,archiveTab:'pages',
+  abandonConfirm:false,
   announced:{},
 };
 window.G = G;
@@ -1003,7 +1004,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseInpu
 
 function togglePause(){
   if(G.mode === 'run') G.mode = 'paused';
-  else if(G.mode === 'paused') G.mode = 'run';
+  else if(G.mode === 'paused'){G.abandonConfirm=false;G.mode = 'run';}
   else if(G.mode === 'forge'){G.mode = 'town';G.turnT=.46;}
   else if(G.mode === 'archive'){G.mode = 'town';G.turnT=.46;}
   else if(G.mode === 'settings'){G.mode = G.returnMode||'menu';G.turnT=.42;}
@@ -1119,6 +1120,7 @@ function activeSkillId(){const id=SV.loadout.implement?.skill||null;return skill
 
 function startRun(){
   G.mode='run';G.turnT=.68; G.t=0; G.frame=0;
+  G.abandonConfirm=false;
   G.enemies.length=0; G.projectiles.length=0; G.eprojectiles.length=0;
   G.gems.length=0; G.drops.length=0; G.pools.length=0; G.corpses.length=0;
   G.minions.length=0; G.fx.length=0; G.floaters.length=0; G.swings.length=0;
@@ -2975,16 +2977,20 @@ function drawPause(){
   ctx.font='500 10px Georgia,serif';ctx.fillText('WASD move  ·  mouse aim  ·  Q active inscription  ·  F equip  ·  Esc continue',W/2,H/2+12);
   const pausedSkill=SKILLS[activeSkillId()];
   if(pausedSkill){ctx.fillStyle=pausedSkill.col;ctx.font='700 11px Georgia,serif';ctx.fillText('Q  ·  '+pausedSkill.name.toUpperCase()+'  ·  '+pausedSkill.desc,W/2,H/2+32);}
-  let y = H/2+58;
+  const compactPause=H<500,stepY=compactPause?15:22;
+  let y = H/2+(compactPause?45:58);
   for(const id of ['grave','ember','oath']){
     const n=G.doct[id]; const D=DOCTRINES[id];
     ctx.fillStyle = n>=3?D.col:'rgba(60,48,32,0.4)';
     ctx.font='600 13px Georgia, serif';
     ctx.fillText(D.name.toUpperCase()+' '+n+(n>=5?'  —  '+D.t5:n>=3?'  —  '+D.t3:'  —  need '+(3-n)+' more'), W/2, y);
-    y+=22;
+    y+=stepY;
   }
-  if(uiButton(W/2-166,y+12,156,30,'CONTINUE',VERD,true))G.mode='run';
-  if(uiButton(W/2+10,y+12,156,30,'OPTIONS  [O]',INK2,true)){G.returnMode='paused';G.mode='settings';G.turnT=.42;}
+  const pauseGap=W<380?12:20,pauseW=Math.min(156,(W-44)/2),pauseLeft=W/2-pauseGap/2-pauseW;
+  if(uiButton(pauseLeft,y+12,pauseW,30,'CONTINUE',VERD,true)){G.abandonConfirm=false;G.mode='run';}
+  if(uiButton(W/2+pauseGap/2,y+12,pauseW,30,'OPTIONS  [O]',INK2,true)){G.abandonConfirm=false;G.returnMode='paused';G.mode='settings';G.turnT=.42;}
+  const leaveLabel=G.abandonConfirm?'CONFIRM  ·  KEEP FOUND GOODS':'END THIS RUN';
+  const leaveW=pauseW*2+pauseGap;if(uiButton(W/2-leaveW/2,y+52,leaveW,30,leaveLabel,G.abandonConfirm?RUBRIC:INK2,true)){if(G.abandonConfirm)endRun();else G.abandonConfirm=true;}
   ctx.restore();
 }
 function drawEnd(won){
