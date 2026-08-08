@@ -101,6 +101,12 @@ twelve manuscript pages remained reachable, rotating formations continued past
 400 kills, projectile cover stayed active, and cleanup kept the active pools
 bounded. This is systems verification, not a substitute for a balance playtest.
 
+The subsequent game-feel pass repeated the smoke through 8:12 with all twelve
+pages, all ten species, the Warden's second phase and victory transition. It
+also asserted the three weapon inscriptions independently: one Margin Cut
+sweep, seven Redline projectiles, and three Black Bloom seals. No runtime error
+was recorded; the intentionally invulnerable harness is still not balance data.
+
 **Balance is UNVALIDATED and should not be tuned from a bot.** A scripted kiting
 policy produced a 235–6167 kill spread across six runs. It can confirm systems
 fire; it cannot tell you whether the game is fun or fair. Two fixes already made
