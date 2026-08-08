@@ -159,6 +159,8 @@ were structural rather than numerical, and are worth knowing:
   and role-based threat cues. The first-run guide can be replayed there.
 - Fallen timber, exposed roots, and destructible letterpress type replace the
   old geometric wall placeholders. Trail marks lead toward major clearings.
+- Cover now defines implement and enemy roles: quills and Longbow shots stop on
+  hard cover, Censer lobs pass over it, and Rootlings thread trees and root shelves.
 - The Broken Press is a repeatable combat hazard; the Black Well condenses XP;
   the Last Desk heals once; the Root Brood and Warden Effigy create field events;
   and the Hanging Folio opens a timed direction-and-distance field index.

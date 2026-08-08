@@ -624,10 +624,10 @@ const IMPLEMENTS = {
     blurb:'A wide ink-black arc. Cleaves everything it touches.',
     cd:0.60, dmg:30, reach:86, arc:1.55 },
   censer:{ key:'censer', name:'Censer', kind:'lob',
-    blurb:'Lobs a smouldering censer that bursts where it lands.',
+    blurb:'Lobs over cover, then bursts where the censer lands.',
     cd:1.00, dmg:24, speed:330, range:250, blast:80 },
   longbow:{ key:'longbow', name:'Longbow', kind:'shot',
-    blurb:'Fast, thin, and it does not stop at the first body.',
+    blurb:'Fast and piercing through bodies; timber stops the line.',
     cd:0.32, dmg:16, speed:660, pierce:2 },
 };
 const IMPL_KEYS = Object.keys(IMPLEMENTS);
@@ -1590,6 +1590,12 @@ function onHit(e, dmg, a){
   floater(Math.round(dmg), e.x, e.y-e.r-4, PARCH);
 }
 
+function projectileBlocked(x,y,r){
+  for(const w of G.walls)if(x>w.x-w.w/2&&x<w.x+w.w/2&&y>w.y-w.h/2&&y<w.y+w.h/2)return true;
+  for(const t of G.trees)if(dist2(x,y,t.x,t.y)<Math.pow(12*t.s+r,2))return true;
+  for(const L of G.landmarks){const cr=L.kind==='press'?58:L.kind==='well'?46:L.kind==='nest'?35:L.kind==='effigy'?24:0;if(cr&&dist2(x,y,L.x,L.y+12)<Math.pow(cr+r,2))return true;}
+  return false;
+}
 function updateProjectiles(dt){
   for(let i=G.projectiles.length-1;i>=0;i--){
     const q = G.projectiles[i];
@@ -1613,7 +1619,8 @@ function updateProjectiles(dt){
         done = true;
       }
     } else {
-      for(const e of G.enemies){
+      if(projectileBlocked(q.x,q.y,q.r)){fx(q.x,q.y,INK2,3);done=true;}
+      for(const e of done?[]:G.enemies){
         const rr = e.r+q.r;
         if(dist2(q.x,q.y,e.x,e.y) < rr*rr){
           if(q.hitset && q.hitset[e.id]) continue;
@@ -2643,9 +2650,7 @@ function updateEnemyProjectiles(dt){
   for(let i=G.eprojectiles.length-1;i>=0;i--){
     const q=G.eprojectiles[i];q.life+=dt;q.x+=Math.cos(q.a)*q.spd*dt;q.y+=Math.sin(q.a)*q.spd*dt;
     let done=q.life>=q.max;
-    if(!done){for(const w of G.walls)if(q.x>w.x-w.w/2&&q.x<w.x+w.w/2&&q.y>w.y-w.h/2&&q.y<w.y+w.h/2){done=true;break;}}
-    if(!done){for(const t of G.trees)if(dist2(q.x,q.y,t.x,t.y)<Math.pow(12*t.s+q.r,2)){done=true;break;}}
-    if(!done){for(const L of G.landmarks){const cr=L.kind==='press'?58:L.kind==='well'?46:L.kind==='nest'?35:L.kind==='effigy'?24:0;if(cr&&dist2(q.x,q.y,L.x,L.y+12)<Math.pow(cr+q.r,2)){done=true;break;}}}
+    if(!done)done=projectileBlocked(q.x,q.y,q.r);
     if(!done&&dist2(q.x,q.y,p.x,p.y)<(q.r+p.r)*(q.r+p.r)){hurtPlayer(q.dmg);done=true;}
     if(done){fx(q.x,q.y,RUBRIC,5);G.eprojectiles.splice(i,1);}
   }
@@ -3247,6 +3252,7 @@ function drawForge(){
       ctx.fillText(inscribed?'ACTIVE INSCRIPTION  —  Q  '+SKILLS[inscribed].name.toUpperCase()
         :'ACTIVE INSCRIPTION  —  NOT YET DISCOVERED',rx,by);
       by+=20;
+      ctx.fillStyle=INK2;ctx.font='italic 500 10px Georgia,serif';ctx.fillText(IMPLEMENTS[G.craftBase].blurb,rx,by);by+=18;
     }
 
     // craft cost — the sentence that explains why the bestiary matters
