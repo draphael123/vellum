@@ -865,6 +865,7 @@ const G = {
   forgeMsg:null,
   townPlayer:{x:0,y:150,face:-Math.PI/2,walk:0}, townNear:null,
   townTarget:null,
+  townNotice:0,
   skills:{margin:0},
   tutorial:false,
   region:'THE RULED GROVE', regionT:0,
@@ -3061,10 +3062,12 @@ function drawMenu(){
 const TOWN_SITES = [
   {id:'forge',x:-260,y:8,r:82,name:'THE INK-FORGE',sub:'inscribe, equip, and shatter gear'},
   {id:'archive',x:0,y:-170,r:70,name:'THE BESTIARY',sub:'read the law of the page'},
+  {id:'seal',x:0,y:35,r:48,name:'THE WARDEN SEAL',sub:'read the inscriptions opened by victory'},
   {id:'gate',x:265,y:4,r:82,name:'THE ORCHARD GATE',sub:'begin the next descent'},
 ];
 function updateTown(dt){
   const p=G.townPlayer; let x=0,y=0;
+  G.townNotice=Math.max(0,G.townNotice-dt);
   if(keys.w||keys.arrowup)y--; if(keys.s||keys.arrowdown)y++;
   if(keys.a||keys.arrowleft)x--; if(keys.d||keys.arrowright)x++;
   if((x||y)&&G.townTarget)G.townTarget=null;
@@ -3161,6 +3164,7 @@ function townInteract(){
   if(s.id==='forge'){G.forgeMsg=null;G.mode='forge';G.turnT=.5;}
   if(s.id==='gate') startRun();
   if(s.id==='archive'){G.archivePage=0;G.archiveTab='pages';G.mode='archive';G.turnT=.5;}
+  if(s.id==='seal'){G.townNotice=5;sfx('page');}
 }
 function townBuilding(x,y,w,h,title,mark){
   ctx.save(); ctx.translate(x,y);
@@ -3226,6 +3230,13 @@ function drawTown(){
     ctx.font='500 12px Georgia,serif';ctx.fillText('Choose a page in the orchard: its gift strengthens you, and its curse rewrites the horde.',W/2,y+49);
     ctx.fillText('Only rewritten foes shed that page’s material. Bring it here to inscribe gear.',W/2,y+69);
     ctx.fillStyle=RUBRIC;ctx.font='italic 12px Georgia,serif';ctx.fillText('Three matching gear keywords awaken a Doctrine.',W/2,y+91);
+  }
+  if(G.townNotice>0){
+    const nw=Math.min(310,W-28),nx=W-nw-18,ny=76;ctx.fillStyle='rgba(230,217,184,.95)';ctx.fillRect(nx,ny,nw,118);ctx.strokeStyle=INK;ctx.lineWidth=2;ctx.strokeRect(nx,ny,nw,118);ctx.strokeStyle=RUBRIC;ctx.lineWidth=1;ctx.strokeRect(nx+6,ny+6,nw-12,106);
+    ctx.textAlign='left';ctx.fillStyle=INK;ctx.font='700 12px Georgia,serif';ctx.fillText('THE THREE WEAPON SEALS',nx+18,ny+26);
+    const seals=[['Greatsword  ·  Margin Cut',0,INK],['Longbow  ·  Redline Volley',1,RUBRIC],['Censer  ·  Black Bloom',2,BLUEIN]];
+    for(let i=0;i<seals.length;i++){const [label,need,col]=seals[i],open=SV.wins>=need;ctx.fillStyle=open?col:'rgba(60,48,32,.38)';ctx.font=(open?'700 ':'500 ')+'10px Georgia,serif';ctx.fillText((open?'OPEN  ':'SEALED  ')+label,nx+18,ny+51+i*20);}
+    ctx.textAlign='right';ctx.fillStyle=INK2;ctx.font='italic 9px Georgia,serif';ctx.fillText(SV.wins<2?'next seal opens after Warden '+(SV.wins+1):'the complete martial folio',nx+nw-18,ny+109);
   }
   ctx.restore();
 }
