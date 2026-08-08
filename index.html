@@ -856,6 +856,7 @@ const G = {
   bossIntro:0,bossChapter:'',
   compare:null,           // {item, t}
   kills:0, killsSinceHeal:0, corpseCount:0,
+  deathCause:null,
   spawnAcc:0, wave:0,
   doct:{grave:0,ember:0,oath:0},
   msg:null,
@@ -1078,7 +1079,7 @@ function startRun(){
   G.traits = {}; G.cards = []; G.offer = [];
   G.runMats = {cinder:0,graveash:0,gilt:0,heartwood:0}; G.runLoot = [];
   G.boss = null; G.bossWarned=false;G.bossIntro=0;G.bossChapter=''; G.compare=null;
-  G.kills=0; G.killsSinceHeal=0; G.corpseCount=0; G.spawnAcc=0; G.wave=0;
+  G.kills=0; G.killsSinceHeal=0; G.corpseCount=0;G.deathCause=null; G.spawnAcc=0; G.wave=0;
   G.skills={}; for(const id of Object.keys(SKILLS)) G.skills[id]=0;
   G.tutorial=!SV.tutorialDone;
   G.region='THE RULED GROVE';G.regionT=0;G.folioT=0;
@@ -1232,7 +1233,7 @@ function updateBoss(dt){
     if(b.tell.t >= b.tell.dur){
       if(b.state==='slam'){
         const T=b.tell;
-        if(dist2(p.x,p.y,T.x,T.y) < T.r*T.r) hurtPlayer(26);
+        if(dist2(p.x,p.y,T.x,T.y) < T.r*T.r) hurtPlayer(26,'warden');
         burst(T.x,T.y,T.r,'slam');
         for(const e of G.enemies) if(dist2(e.x,e.y,T.x,T.y)<T.r*T.r) damageEnemy(e, 40, 0);
         G.shake = 12;
@@ -1241,7 +1242,7 @@ function updateBoss(dt){
         const dx=Math.cos(T.a), dy=Math.sin(T.a);
         const rel = (p.x-b.x)*dx + (p.y-b.y)*dy;
         const off = Math.abs((p.x-b.x)*(-dy) + (p.y-b.y)*dx);
-        if(rel>0 && rel<T.len && off < T.wide) hurtPlayer(22);
+        if(rel>0 && rel<T.len && off < T.wide) hurtPlayer(22,'warden');
         for(let i=0;i<10;i++) fx(b.x+dx*(i*50), b.y+dy*(i*50), RUBRIC, 16);
         G.shake = 9;
       } else {
@@ -1254,7 +1255,7 @@ function updateBoss(dt){
     }
   }
   // contact
-  if(dist2(b.x,b.y,p.x,p.y) < (b.r+p.r)*(b.r+p.r)) hurtPlayer(20*dt*3.2);
+  if(dist2(b.x,b.y,p.x,p.y) < (b.r+p.r)*(b.r+p.r)) hurtPlayer(20*dt*3.2,'warden');
 
   if(b.hp <= 0){
     for(let i=0;i<40;i++) fx(b.x+rand(80,-80), b.y+rand(80,-80), INK, 30);
@@ -1439,13 +1440,13 @@ function boneShard(x,y){
     kind:'shot', life:0, travel:0, range:420, pierce:1, forked:true, r:4, bone:true});
 }
 function heal(n){ const p=G.player; p.hp = Math.min(p.maxhp, p.hp+n); floater('+'+n, p.x, p.y-20, VERD); }
-function hurtPlayer(n){
+function hurtPlayer(n,source){
   const p = G.player;
   if(p.hurtT > 0) return;
   if(p.ward){ p.ward=false; p.wardT=0; floater('WARD', p.x, p.y-24, GOLD); G.shake=6; return; }
   p.hp -= n; p.hurtT = 0.42; G.shake = Math.max(G.shake, 5);sfx('hurt');
   floater('-'+Math.round(n), p.x, p.y-18, RUBRIC);
-  if(p.hp <= 0){ p.hp = 0; G.mode = 'dead';sfx('dead'); }
+  if(p.hp <= 0){ p.hp = 0;G.deathCause=source||'the horde'; G.mode = 'dead';sfx('dead'); }
 }
 /* Death isn't a puff of dots — the creature un-prints, throwing ink specks
    that stretch along their travel like flicked-off a brush. */
@@ -1670,6 +1671,10 @@ function projectileBlocked(x,y,r){
   for(const L of G.landmarks){const cr=L.kind==='press'?58:L.kind==='well'?46:L.kind==='nest'?35:L.kind==='effigy'?24:0;if(cr&&dist2(x,y,L.x,L.y+12)<Math.pow(cr+r,2))return true;}
   return false;
 }
+function lineBlocked(ax,ay,bx,by){
+  for(let i=1;i<8;i++){const k=i/8;if(projectileBlocked(lerp(ax,bx,k),lerp(ay,by,k),3))return true;}
+  return false;
+}
 function updateProjectiles(dt){
   for(let i=G.projectiles.length-1;i>=0;i--){
     const q = G.projectiles[i];
@@ -1780,13 +1785,14 @@ function updateEnemies(dt){
     }
     if(e.kind==='inkspitter'){
       e.special-=dt;
+      e.losT=(e.losT||0)-dt;if(e.losT<=0){e.losT=.16+e.id%4*.025;e.seekingLine=lineBlocked(e.x,e.y,p.x,p.y);}
       if(e.windup>0){
         e.windup-=dt;spd*=0.18;
         if(e.windup<=0){
           const qa=angTo(e.x,e.y,p.x,p.y);
           G.eprojectiles.push({x:e.x,y:e.y,a:qa,spd:245,r:5,dmg:e.dmg,life:0,max:3.2});
         }
-      } else if(e.special<=0 && dist2(e.x,e.y,p.x,p.y)<410*410){e.special=3.4;e.windup=0.72;}
+      } else if(e.special<=0&&!e.seekingLine&&dist2(e.x,e.y,p.x,p.y)<410*410){e.special=3.4;e.windup=0.72;}
     }
     if(G.traits.frenzy && e.hp<e.maxhp*0.5) spd*=1.28;
     if(G.traits.seal && !e.sealSpent && e.hp<1){ e.sealSpent=true; e.hp=e.maxhp*0.18; }
@@ -1804,7 +1810,8 @@ function updateEnemies(dt){
     let a = angTo(e.x,e.y,p.x,p.y),move=1;
     if(e.kind==='inkspitter'){
       const d2p=dist2(e.x,e.y,p.x,p.y);
-      if(d2p<205*205)a+=Math.PI;else if(d2p<315*315)move=0;
+      if(e.seekingLine){a+=(e.id%2?1:-1)*Math.PI*.46;move=1;}
+      else if(d2p<205*205)a+=Math.PI;else if(d2p<315*315)move=0;
     }
     e.x += (Math.cos(a)*spd*move + e.vx)*dt;
     e.y += (Math.sin(a)*spd*move + e.vy)*dt;
@@ -1822,14 +1829,14 @@ function updateEnemies(dt){
     const rr = e.r + p.r;
     if(dist2(e.x,e.y,p.x,p.y) < rr*rr){
       e.touch -= dt;
-      if(e.touch <= 0){ e.touch = 0.55; hurtPlayer(e.dmg); }
+      if(e.touch <= 0){ e.touch = 0.55; hurtPlayer(e.dmg,e.kind); }
     }
     // thorn trait — a hurt-radius, not just contact
     if(thorn){
       const tr = e.r + p.r + 16;
       if(dist2(e.x,e.y,p.x,p.y) < tr*tr){
         e.thornT = (e.thornT||0) - dt;
-        if(e.thornT <= 0){ e.thornT = 1.0; hurtPlayer(e.dmg*0.35); }
+        if(e.thornT <= 0){ e.thornT = 1.0; hurtPlayer(e.dmg*0.35,e.kind); }
       }
     }
     // bark trait — flat reduction handled at damage time via marker
@@ -1886,7 +1893,7 @@ function updatePools(dt){
       }
       if(G.boss && dist2(G.boss.x,G.boss.y,q.x,q.y) < (q.r+G.boss.r)*(q.r+G.boss.r)) G.boss.hp -= 6;
       // the fire you wrote burns you too — but only from the trait, not the doctrine
-      if(G.traits.ember && dist2(p.x,p.y,q.x,q.y) < q.r*q.r) hurtPlayer(3);
+      if(G.traits.ember && dist2(p.x,p.y,q.x,q.y) < q.r*q.r) hurtPlayer(3,'scorch');
       if(q.chain && Math.random()<0.5){
         let best=null,bd=1e9;
         for(const e of G.enemies){ const d=dist2(q.x,q.y,e.x,e.y); if(d<bd && d<260*260){bd=d;best=e;} }
@@ -2735,7 +2742,7 @@ function updateEnemyProjectiles(dt){
     const q=G.eprojectiles[i],ox=q.x,oy=q.y;q.life+=dt;q.x+=Math.cos(q.a)*q.spd*dt;q.y+=Math.sin(q.a)*q.spd*dt;
     let done=q.life>=q.max;
     if(!done)done=projectileBlocked(q.x,q.y,q.r)||projectileBlocked((q.x+ox)/2,(q.y+oy)/2,q.r);
-    if(!done&&dist2(q.x,q.y,p.x,p.y)<(q.r+p.r)*(q.r+p.r)){hurtPlayer(q.dmg);done=true;}
+    if(!done&&dist2(q.x,q.y,p.x,p.y)<(q.r+p.r)*(q.r+p.r)){hurtPlayer(q.dmg,'inkspitter');done=true;}
     if(done){fx(q.x,q.y,RUBRIC,5);G.eprojectiles.splice(i,1);}
   }
   for(const q of G.eprojectiles){
@@ -2931,6 +2938,12 @@ function drawEnd(won){
     ctx.fillStyle=RUBRIC;ctx.font='700 13px Georgia,serif';ctx.fillText('SEAL BROKEN  ·  '+opened.name.toUpperCase(),W/2,y+12);
     ctx.fillStyle=won?INK2:PARCH3;ctx.font='italic 11px Georgia,serif';ctx.fillText(opened.desc,W/2,y+31);
   }
+  if(!won){
+    const cause=G.deathCause==='warden'?'THE ORCHARD-WARDEN':G.deathCause==='scorch'?'A SCORCH MARK':G.deathCause==='inkspitter'?'AN INKSPITTER QUILL':ENEMY_LORE[G.deathCause]?.[0]||'THE HORDE';
+    const advice=G.t<60?'Turn the first pursuers through a trunk before committing to damage.':G.landmarks.filter(L=>L.discovered).length<3?'The Desk, Well, Press, Folio, Brood, and Effigy each change a run.':Math.max(G.doct.grave,G.doct.ember,G.doct.oath)<3?'Three matching Forge keywords awaken a Doctrine before the dive.':'Break Bellowers and Stumpguards before fighting the bodies they strengthen.';
+    ctx.fillStyle=RUBRIC;ctx.font='700 10px Georgia,serif';ctx.fillText('LAST MARK  ·  '+cause,W/2,H-106);
+    ctx.fillStyle=PARCH3;ctx.font='italic 11px Georgia,serif';ctx.fillText(advice,W/2,H-86);
+  }
 
   ctx.font='600 13px Georgia, serif'; ctx.fillStyle = won?RUBRIC:GOLD;
   ctx.fillText('press SPACE to return to the Scriptorium', W/2, H-56);
@@ -2995,6 +3008,8 @@ function drawMenu(){
     if(!SV.townSeen){ SV.townSeen=true; persist(); G.townIntro=8; }
   }
   if(uiButton(W/2-80,H*0.63+58,160,28,'OPTIONS  [O]',INK2,true)){G.returnMode='menu';G.mode='settings';}
+  ctx.textAlign='center';ctx.fillStyle=SV.wins?RUBRIC:INK2;ctx.font='700 9px Georgia,serif';
+  ctx.fillText(SV.wins?SV.wins+' WARDEN'+(SV.wins===1?'':'S')+' FELLED  ·  '+(SV.wins<2?(SV.wins+1)+' / 3 WEAPON SEALS OPEN':'ALL WEAPON SEALS OPEN'):'FIRST IMPRESSION  ·  THE ORCHARD IS UNREAD',W/2,H*.63+108);
 
   // the horde, walking the bottom rule
   if(ART_READY){
