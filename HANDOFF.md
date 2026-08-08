@@ -129,19 +129,43 @@ were structural rather than numerical, and are worth knowing:
 
 ---
 
+## August 2026 expansion
+
+- The static Forge is now reached through a walkable Scriptorium. Walk with
+  WASD and press `E` at the Ink-Forge, Bestiary, or Orchard Gate.
+- The Bestiary contains twelve pages, up from six.
+- Three later-run enemy roles were added: rootlings, needlekin, and bellowers.
+- Three additional Orchard roles broaden the first zone: Inkspitters telegraph
+  ranged quills, Broodpods split into Rootlings, and Stumpguards act as durable
+  moving walls. Their arrivals begin around minutes 2, 4.4, and 6 respectively.
+- Material drops now name themselves in-world when collected from a kill.
+- One fixed active ability establishes the baseline without creating another
+  progression track: `Q` Margin Cut drives the surrounding crowd outward. It
+  is saved as the Greatsword's active inscription; Censer and Longbow currently
+  display an intentional "not yet discovered" state and have no active HUD.
+- Trees, broken printer-rule walls, and local crowd separation
+  now create lanes and funnels. Collision is deliberately soft to avoid jams.
+- The combat HUD now uses Doctrine seals, skill cooldown plates, an in-world
+  ward recharge ring, and a staged first-run tutorial.
+- The Orchard is one mechanical zone with six visual districts, five authored
+  landmarks, rotating formation waves, and rare gilded elites. This creates
+  exploration and encounter diversity without adding a second material line.
+- Page selection now resolves with a short transformation stamp showing the
+  horde trait and its material colour. Player damage has an edge impression.
+- Newer creature families have baked silhouette additions rather than relying
+  only on runtime colour marks.
+- Zone 2 and audio remain deliberately out of scope.
+
 ## Suggested next work, roughly in order
 
 1. **Human playtest first.** The open questions are: does the curse half of a page
    read as exciting or as a tax; is 8 minutes the right zone length; does the
    Forge give a real reason to run twice. Everything below is downstream of that.
-2. **Zone 2** with a contrasting material line, so "what am I farming tonight"
-   becomes a real choice. This is the actual pitch and it isn't provable with one
-   zone.
-3. **More pages.** Six is thin; the draft repeats too fast. Aim for 12–14 so runs
-   diverge. Each needs a boon, a curse, and a material line — no exceptions.
+2. **Tune the new enemy arrival windows** with human play rather than simulations.
+3. **Tune the six new page pairings** after testing which curse directions
+   create readable pressure in a full run.
 4. **A fourth implement**, and a second Doctrine tier at 7 keywords.
-5. Audio. There is none at all.
-6. Mobile / touch controls. Currently keyboard + mouse only.
+5. Mobile / touch controls. Currently keyboard + mouse only.
 
 Things deliberately **not** built: enemy variety beyond three kinds, run modifiers,
 meta skill tree (rejected — it would be a third progression system), any art
