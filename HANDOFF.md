@@ -154,6 +154,8 @@ were structural rather than numerical, and are worth knowing:
 - Stumpguards shelter nearby lesser creatures, Bellowers accelerate their
   neighbours, and Broodpods release runners. Threat rings and guard brackets
   expose these relationships so formations have a readable target priority.
+- Inkspitters sample the firing line at a bounded cadence, sidestep when trees
+  or hard cover interrupt it, and only begin a red telegraph after finding a shot.
 - Material drops now name themselves in-world when collected from a kill.
 - Active abilities remain weapon inscriptions rather than a separate skill tree:
   Greatsword starts with `Q` Margin Cut, the first Warden opens Longbow's
@@ -175,6 +177,9 @@ were structural rather than numerical, and are worth knowing:
   density, contrast, and role-based threat cues. The first-run guide can be
   replayed there. Audio is synthesized at runtime from paper noise, wooden
   impacts, rubric tones, and Warden drones; there are no external samples.
+- Touch play uses a left drag for movement, right drag for aiming, the active
+  inscription plate as its skill button, and explicit Return/Continue controls
+  throughout town screens. Found gear also has a clickable take action.
 - Fallen timber, exposed roots, and destructible letterpress type replace the
   old geometric wall placeholders. Trail marks lead toward major clearings.
 - Cover now defines implement and enemy roles: quills and Longbow shots stop on
@@ -186,6 +191,9 @@ were structural rather than numerical, and are worth knowing:
   horde trait and its material colour. Player damage has an edge impression.
 - The Warden now enters under a full-width chapter plate, receives a second
   impression at half Vellum, and has distinct arrival, phase, and ending cues.
+- Screen changes use a short procedural page-turn wipe, defeat names the final
+  threat and offers contextual advice, and page choices label weapon/Doctrine
+  synergies. The central town seal is now an interactable unlock record.
 - Newer creature families have baked silhouette additions rather than relying
   only on runtime colour marks.
 - Zone 2 remains deliberately out of scope.
@@ -199,7 +207,7 @@ were structural rather than numerical, and are worth knowing:
 3. **Tune the six new page pairings** after testing which curse directions
    create readable pressure in a full run.
 4. **A fourth implement**, and a second Doctrine tier at 7 keywords.
-5. Mobile / touch controls. Currently keyboard + mouse only.
+5. Device playtest the touch controls and tune thumb-zone sizes on real phones.
 
 Things deliberately **not** built: Zone 2, run modifiers,
 meta skill tree (rejected — it would be a third progression system), or external
